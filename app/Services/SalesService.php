@@ -1,0 +1,197 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\InvoiceStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
+use App\Enums\PaymentType;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\PaymentMethod;
+use App\Models\Product;
+use App\Models\SalesInvoice;
+use App\Models\SalesReceipt;
+use App\Models\Setting;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+class SalesService
+{
+    public function __construct(private readonly AccountingService $accountingService) {}
+
+    /**
+     * Create an order with its items, invoice, stock deduction and journal posting.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, notes?: string|null}  $options
+     */
+    public function createOrder(?User $user, string $tableNumber, PaymentType $paymentType, array $items, array $options = []): Order
+    {
+        return DB::transaction(function () use ($user, $tableNumber, $paymentType, $items, $options) {
+            $order = Order::create([
+                'order_number' => $this->nextOrderNumber(),
+                'table_number' => $tableNumber ?: null,
+                'user_id' => $user?->id,
+                'payment_type' => $paymentType->value,
+                'status' => OrderStatus::Pending->value,
+                'payment_status' => PaymentStatus::Unpaid->value,
+                'notes' => $options['notes'] ?? null,
+            ]);
+
+            $subtotal = 0.0;
+            $cogs = 0.0;
+
+            foreach ($items as $line) {
+                $product = Product::where('is_active', true)->findOrFail($line['product_id']);
+                $qty = max(1, (int) $line['qty']);
+
+                $this->decrementStock($product, $qty);
+
+                OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'qty' => $qty,
+                    'price' => $product->price,
+                    'notes' => $line['notes'] ?? null,
+                ]);
+
+                $subtotal += $qty * $product->price;
+                $cogs += $qty * $product->cost_price;
+            }
+
+            $discount = min(max((float) ($options['discount'] ?? 0), 0), $subtotal);
+            $taxableBase = $subtotal - $discount;
+
+            $ppnRate = $options['tax_rate'] ?? Setting::get('pos.ppn_rate', 0);
+
+            $taxAmount = round($taxableBase * ((float) $ppnRate / 100), 2);
+            $totalAmount = round($taxableBase + $taxAmount, 2);
+
+            $order->update([
+                'subtotal' => $subtotal,
+                'discount' => $discount,
+                'tax_amount' => $taxAmount,
+                'total_amount' => $totalAmount,
+            ]);
+
+            $invoice = $this->issueInvoice($order, $cogs);
+
+            if ($paymentType === PaymentType::PayNow) {
+                $method = PaymentMethod::where('code', $options['payment_method'] ?? 'cash')->where('is_active', true)->first()
+                    ?? PaymentMethod::where('code', 'cash')->firstOrFail();
+                $this->processPayment($invoice, $method, $totalAmount);
+                $order->update(['payment_status' => PaymentStatus::Paid->value]);
+            }
+
+            return $order->fresh(['items.product', 'invoice', 'invoice.receipts']);
+        });
+    }
+
+    /**
+     * Settle a payment for a Pay Later order at checkout.
+     */
+    public function settlePayment(Order $order, PaymentMethod $method): SalesReceipt
+    {
+        if ($order->payment_status === PaymentStatus::Paid->value) {
+            throw new \DomainException('Order ini sudah lunas.');
+        }
+
+        if (! $order->invoice) {
+            throw new \DomainException('Faktur belum tersedia.');
+        }
+
+        return DB::transaction(function () use ($order, $method) {
+            $invoice = $order->invoice;
+            $receipt = $this->processPayment($invoice, $method, (float) $invoice->total_amount);
+            $order->update(['payment_status' => PaymentStatus::Paid->value]);
+
+            return $receipt;
+        });
+    }
+
+    /**
+     * Complete the order when food has been served.
+     */
+    public function completeOrder(Order $order): Order
+    {
+        return DB::transaction(function () use ($order) {
+            $order->update(['status' => OrderStatus::Completed->value]);
+
+            return $order->fresh('items.product');
+        });
+    }
+
+    /**
+     * Issue a sales invoice for the order and post the accounting journal.
+     */
+    private function issueInvoice(Order $order, float $cogs): SalesInvoice
+    {
+        $invoice = SalesInvoice::create([
+            'order_id' => $order->id,
+            'invoice_number' => 'INV-'.now()->format('Ymd').'-'.$order->id,
+            'total_amount' => $order->total_amount,
+            'status' => InvoiceStatus::Issued->value,
+            'issued_at' => now(),
+        ]);
+
+        $this->accountingService->postSalesInvoice($invoice, $cogs);
+
+        return $invoice;
+    }
+
+    /**
+     * Process a payment, recording the receipt and posting the journal.
+     */
+    private function processPayment(SalesInvoice $invoice, PaymentMethod $method, float $grossAmount): SalesReceipt
+    {
+        $mdrFee = round($grossAmount * $method->mdr_rate, 2);
+        $netAmount = round($grossAmount - $mdrFee, 2);
+
+        $receipt = SalesReceipt::create([
+            'invoice_id' => $invoice->id,
+            'payment_method' => $method->code,
+            'gross_amount' => $grossAmount,
+            'mdr_fee' => $mdrFee,
+            'net_amount' => $netAmount,
+            'payment_date' => now(),
+        ]);
+
+        $invoice->update([
+            'status' => InvoiceStatus::Paid->value,
+        ]);
+
+        $this->accountingService->postSalesReceipt($receipt);
+
+        return $receipt;
+    }
+
+    /**
+     * Decrease product stock within the wrapping transaction.
+     */
+    private function decrementStock(Product $product, int $qty): void
+    {
+        $product->decrement('stock', $qty);
+
+        if ($product->fresh()->stock < 0) {
+            throw new \DomainException("Stok {$product->name} tidak mencukupi.");
+        }
+    }
+
+    /**
+     * Generate the next order number for today.
+     */
+    private function nextOrderNumber(): string
+    {
+        $today = now()->format('Ymd');
+        $last = Order::whereDate('created_at', now()->toDateString())
+            ->where('order_number', 'like', "ORD-{$today}-%")
+            ->orderByDesc('id')
+            ->first();
+
+        $next = $last ? ((int) Str::afterLast($last->order_number, '-')) + 1 : 1;
+
+        return "ORD-{$today}-".str_pad((string) $next, 4, '0', STR_PAD_LEFT);
+    }
+}

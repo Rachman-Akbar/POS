@@ -1,0 +1,60 @@
+### Alur Sistem Operasional
+
+```
+[1. Daftar Barang] 
+       │
+       ▼
+  [2. Pesan]
+       │
+       ├──────────────────────────────┐
+       ▼                              ▼
+ [Bayar Dulu]                    [Bayar Nanti]
+ (Faktur + Pelunasan)            (Faktur gantung)
+       │                              │
+       └──────────────┬───────────────┘
+                      │
+                      ▼
+              [3. SPK Dapur]
+                      │
+                      ▼
+              [4. Produksi]
+       (Dimasak ──> Disiapkan ──> Selesai)
+                      │
+                      ▼
+            [5. Siap Diantar]
+                      │
+                      ▼
+               [6. Selesai]
+                      │
+        (Jika Bayar Nanti: Pelunasan Kasir)
+
+
+```
+
+1. **Daftar Barang**: Waiter/Kasir memilih menu dari katalog.
+2. **Pesan**: Input item pesanan, jumlah, dan catatan khusus.
+3. **Pilih Skema Bayar**:
+* **Bayar Dulu**: Kasir menerima pembayaran langsung. Sistem mencatat **Faktur Penjualan** sekaligus **Penerimaan Penjualan** (Lunas).
+* **Bayar Nanti**: Sistem mencatat **Faktur Penjualan (Piutang/Pending)**. Pembayaran dilakukan di akhir setelah pelanggan selesai makan.
+
+
+4. **SPK (Surat Perintah Kerja) Dapur**: Pesanan langsung terkirim otomatis ke layar dapur/koki.
+5. **Produksi**: Koki mengubah status secara berurutan: **Dimasak** $\rightarrow$ **Disiapkan** $\rightarrow$ **Selesai**.
+6. **Siap Diantar**: Waiter menerima notifikasi real-time bahwa makanan siap disajikan.
+7. **Selesai**: Makanan sampai ke pelanggan. Jika memilih "Bayar Nanti", proses ditutup dengan pelunasan di kasir (**Penerimaan Penjualan**).
+
+---
+
+### Alur Akuntansi (Faktur $\rightarrow$ Penerimaan Penjualan)
+
+* **Saat Faktur Diterbitkan (Order Dikerjakan)**:
+* **Debit**: Piutang Usaha / Kasir
+* **Debit**: HPP (Beban Pokok Penjualan)
+* **Kredit**: Pendapatan Penjualan
+* **Kredit**: Persediaan Bahan Baku (Stok berkurang otomatis)
+
+
+* **Saat Penerimaan Pembayaran (Kasir Checkout/Pelunasan)**:
+* **Debit**: Kas / Bank / QRIS
+* **Debit**: Biaya Admin / MDR (Jika ada)
+* **Kredit**: Piutang Usaha / Kasir (Piutang Lunas)
