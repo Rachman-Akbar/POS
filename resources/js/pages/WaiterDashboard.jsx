@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-    CheckCircle2, Minus, Plus, ShoppingCart, Trash2, UtensilsCrossed, Send,
+    CheckCircle2, Minus, Plus, ShoppingCart, Trash2, Send,
     Clock, Bike, Percent, ReceiptText,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import Tabs from '../components/Tabs';
 import ProductCatalog from '../components/ProductCatalog';
 import { StatusBadge, PaymentBadge } from '../components/badges';
 import { api, formatIDR } from '../api/client';
@@ -115,25 +114,18 @@ export default function WaiterDashboard() {
         }
     };
 
-    return (
-        <Layout
-            title="Waiter"
-            subtitle="Pesanan & antar ke pelanggan"
-            right={
-                <span className="badge badge-paid bg-orange-100 text-orange-700">
-                    <UtensilsCrossed size={14} /> POS Online
-                </span>
-            }
-        >
-            <Tabs
-                tabs={[
-                    { key: 'antar', label: 'Antar', icon: Bike },
-                    { key: 'pesanan', label: 'Pesanan', icon: ShoppingCart },
-                ]}
-                active={tab}
-                onChange={setTab}
-            />
+    const header = {
+        navLabel: 'Waiter',
+        navItems: [
+            { key: 'antar', label: 'Antar', icon: Bike, count: ready.length },
+            { key: 'pesanan', label: 'Pesanan', icon: ShoppingCart },
+        ],
+        activeNav: tab,
+        onNavChange: setTab,
+    };
 
+    return (
+        <Layout header={header}>
             {tab === 'antar' && (
                 <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -189,7 +181,7 @@ export default function WaiterDashboard() {
                     </div>
 
                     <div>
-                        <div className="card sticky top-6">
+                        <div className="card sticky top-20">
                             <h3 className="font-bold mb-3 flex items-center gap-2">
                                 <ShoppingCart size={18} /> Pesanan {cart.length > 0 && `(${cart.length} item)`}
                             </h3>

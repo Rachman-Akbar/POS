@@ -2,23 +2,24 @@
 
 namespace App\Models;
 
+use Database\Factories\CashBankAccountFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class PaymentMethod extends Model
+class CashBankAccount extends Model
 {
+    /** @use HasFactory<CashBankAccountFactory> */
     use HasFactory;
 
     protected $fillable = [
-        'code',
-        'type',
         'name',
-        'mdr_rate',
+        'type',
+        'account_number',
+        'bank_name',
         'is_active',
     ];
 
     protected $casts = [
-        'mdr_rate' => 'float',
         'is_active' => 'boolean',
     ];
 }

@@ -11,6 +11,7 @@ export const ITEM_STATUS = {
 
 export const PAYMENT_STATUS = {
     paid: { label: 'Lunas', badge: 'badge-paid' },
+    partial: { label: 'Bayar Sebagian', badge: 'badge-cooking' },
     unpaid: { label: 'Belum Bayar', badge: 'badge-unpaid' },
 };
 

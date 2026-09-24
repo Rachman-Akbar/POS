@@ -25,7 +25,7 @@ class SalesService
      * Create an order with its items, invoice, stock deduction and journal posting.
      *
      * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
-     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, notes?: string|null}  $options
+     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, paid_amount?: float|null, notes?: string|null}  $options
      */
     public function createOrder(?User $user, string $tableNumber, PaymentType $paymentType, array $items, array $options = []): Order
     {
@@ -37,6 +37,7 @@ class SalesService
                 'payment_type' => $paymentType->value,
                 'status' => OrderStatus::Pending->value,
                 'payment_status' => PaymentStatus::Unpaid->value,
+                'paid_amount' => 0,
                 'notes' => $options['notes'] ?? null,
             ]);
 
@@ -79,10 +80,30 @@ class SalesService
             $invoice = $this->issueInvoice($order, $cogs);
 
             if ($paymentType === PaymentType::PayNow) {
-                $method = PaymentMethod::where('code', $options['payment_method'] ?? 'cash')->where('is_active', true)->first()
-                    ?? PaymentMethod::where('code', 'cash')->firstOrFail();
-                $this->processPayment($invoice, $method, $totalAmount);
-                $order->update(['payment_status' => PaymentStatus::Paid->value]);
+                $tendered = isset($options['paid_amount']) && $options['paid_amount'] !== null
+                    ? (float) $options['paid_amount']
+                    : $totalAmount;
+
+                if ($tendered < $totalAmount && ! $this->prepayEnabled()) {
+                    throw new \DomainException('Nominal pembayaran kurang dari total tagihan.');
+                }
+
+                $applied = round(min(max($tendered, 0), $totalAmount), 2);
+
+                if ($applied > 0) {
+                    $method = PaymentMethod::where('code', $options['payment_method'] ?? 'cash')->where('is_active', true)->first()
+                        ?? PaymentMethod::where('code', 'cash')->firstOrFail();
+                    $this->processPayment($invoice, $method, $applied);
+                }
+
+                $order->update([
+                    'paid_amount' => $applied,
+                    'payment_status' => match (true) {
+                        $applied <= 0 => PaymentStatus::Unpaid->value,
+                        $applied >= $totalAmount => PaymentStatus::Paid->value,
+                        default => PaymentStatus::Partial->value,
+                    },
+                ]);
             }
 
             return $order->fresh(['items.product', 'invoice', 'invoice.receipts']);
@@ -90,9 +111,9 @@ class SalesService
     }
 
     /**
-     * Settle a payment for a Pay Later order at checkout.
+     * Settle a payment (full or partial) for an outstanding order at checkout.
      */
-    public function settlePayment(Order $order, PaymentMethod $method): SalesReceipt
+    public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null): SalesReceipt
     {
         if ($order->payment_status === PaymentStatus::Paid->value) {
             throw new \DomainException('Order ini sudah lunas.');
@@ -102,10 +123,33 @@ class SalesService
             throw new \DomainException('Faktur belum tersedia.');
         }
 
-        return DB::transaction(function () use ($order, $method) {
+        return DB::transaction(function () use ($order, $method, $amount) {
             $invoice = $order->invoice;
-            $receipt = $this->processPayment($invoice, $method, (float) $invoice->total_amount);
-            $order->update(['payment_status' => PaymentStatus::Paid->value]);
+            $total = (float) $invoice->total_amount;
+            $received = round((float) $invoice->receipts()->sum('gross_amount'), 2);
+            $remaining = round($total - $received, 2);
+
+            if ($remaining <= 0) {
+                throw new \DomainException('Faktur ini sudah lunas.');
+            }
+
+            $payAmount = $amount === null
+                ? $remaining
+                : round(min(max((float) $amount, 0), $remaining), 2);
+
+            if ($payAmount <= 0) {
+                throw new \DomainException('Nominal pembayaran tidak valid.');
+            }
+
+            $receipt = $this->processPayment($invoice, $method, $payAmount);
+
+            $newReceived = round($received + $payAmount, 2);
+            $order->update([
+                'paid_amount' => $newReceived,
+                'payment_status' => $newReceived >= $total
+                    ? PaymentStatus::Paid->value
+                    : PaymentStatus::Partial->value,
+            ]);
 
             return $receipt;
         });
@@ -158,13 +202,27 @@ class SalesService
             'payment_date' => now(),
         ]);
 
+        $received = round((float) $invoice->receipts()->sum('gross_amount'), 2);
+
         $invoice->update([
-            'status' => InvoiceStatus::Paid->value,
+            'status' => $received >= (float) $invoice->total_amount
+                ? InvoiceStatus::Paid->value
+                : InvoiceStatus::Issued->value,
         ]);
 
         $this->accountingService->postSalesReceipt($receipt);
 
         return $receipt;
+    }
+
+    /**
+     * Whether the cashier is allowed to accept partial payments up front.
+     */
+    private function prepayEnabled(): bool
+    {
+        $value = Setting::get('pos.cashier_enable_prepay', false);
+
+        return is_bool($value) ? $value : filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     /**

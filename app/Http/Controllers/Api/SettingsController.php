@@ -22,9 +22,11 @@ class SettingsController extends Controller
                 'ppn_rate' => (float) Setting::get('pos.ppn_rate', 0),
                 'qris_id' => Setting::get('pos.qris_id', ''),
                 'receipt_footer' => Setting::get('pos.receipt_footer', 'Terima kasih!'),
+                'cashier' => Setting::cashierFlags(),
+                'table_numbers' => Setting::tableNumbers(),
                 'payment_methods' => PaymentMethod::where('is_active', true)
                     ->orderBy('id')
-                    ->get(['id', 'code', 'name', 'mdr_rate']),
+                    ->get(['id', 'code', 'type', 'name', 'mdr_rate']),
                 'raw' => $settings,
             ],
         ]);

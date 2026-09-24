@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\InvoiceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\PaymentType;
@@ -10,6 +11,7 @@ use App\Models\JournalEntry;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\SalesInvoice;
+use App\Models\Setting;
 use App\Models\User;
 use Database\Seeders\ChartOfAccountSeeder;
 use Database\Seeders\PaymentMethodSeeder;
@@ -78,6 +80,47 @@ class OrderFlowTest extends TestCase
 
         $order = Order::firstOrFail();
         $this->assertSame(0, $order->invoice->receipts()->count());
+    }
+
+    public function test_partial_pay_now_requires_prepay_enabled(): void
+    {
+        $response = $this->actingAs($this->waiter)->postJson('/api/orders', [
+            'payment_type' => PaymentType::PayNow->value,
+            'paid_amount' => 1000,
+            'items' => [
+                ['product_id' => $this->product->id, 'qty' => 1],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_partial_pay_now_records_partial_payment_when_prepay_enabled(): void
+    {
+        Setting::query()->create([
+            'key' => 'pos.cashier_enable_prepay',
+            'group' => 'pos',
+            'value' => 'true',
+            'is_active' => true,
+        ]);
+
+        $partial = round((float) $this->product->price / 2, 2);
+
+        $response = $this->actingAs($this->waiter)->postJson('/api/orders', [
+            'payment_type' => PaymentType::PayNow->value,
+            'paid_amount' => $partial,
+            'items' => [
+                ['product_id' => $this->product->id, 'qty' => 1],
+            ],
+        ]);
+
+        $response->assertCreated()->assertJsonPath('data.payment_status', PaymentStatus::Partial->value);
+
+        $order = Order::firstOrFail();
+        $this->assertSame($partial, (float) $order->paid_amount);
+        $this->assertSame(1, $order->invoice->receipts()->count());
+        $this->assertSame(InvoiceStatus::Issued->value, $order->invoice->status);
     }
 
     public function test_stock_is_not_negative_when_qty_exceeds_stock(): void

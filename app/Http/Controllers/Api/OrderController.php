@@ -55,6 +55,7 @@ class OrderController extends Controller
             'discount' => ['nullable', 'numeric', 'min:0'],
             'tax_rate' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['nullable', 'string', 'max:25'],
+            'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'exists:products,id'],
             'items.*.qty' => ['required', 'integer', 'min:1'],
@@ -71,6 +72,7 @@ class OrderController extends Controller
                     'discount' => (float) ($data['discount'] ?? 0),
                     'tax_rate' => isset($data['tax_rate']) ? (float) $data['tax_rate'] : null,
                     'payment_method' => $data['payment_method'] ?? null,
+                    'paid_amount' => isset($data['paid_amount']) ? (float) $data['paid_amount'] : null,
                     'notes' => $data['notes'] ?? null,
                 ],
             );

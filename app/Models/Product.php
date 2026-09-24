@@ -18,6 +18,7 @@ class Product extends Model
         'stock',
         'category',
         'image',
+        'is_favorite',
         'is_active',
     ];
 
@@ -25,6 +26,7 @@ class Product extends Model
         'price' => 'decimal:2',
         'cost_price' => 'decimal:2',
         'stock' => 'integer',
+        'is_favorite' => 'boolean',
         'is_active' => 'boolean',
     ];
 

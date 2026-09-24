@@ -89,6 +89,28 @@ class PaymentFlowTest extends TestCase
         $this->assertDatabaseCount('sales_receipts', 1);
     }
 
+    public function test_cashier_can_settle_partial_amount_then_remaining(): void
+    {
+        $order = $this->createPayLaterOrder();
+        $half = round((float) $order->total_amount / 2, 2);
+
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$order->id}/settle", [
+            'payment_method' => 'cash',
+            'amount' => $half,
+        ])->assertOk();
+
+        $this->assertSame(PaymentStatus::Partial->value, $order->refresh()->payment_status);
+        $this->assertSame(InvoiceStatus::Issued->value, $order->invoice->refresh()->status);
+
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$order->id}/settle", [
+            'payment_method' => 'cash',
+        ])->assertOk();
+
+        $this->assertSame(PaymentStatus::Paid->value, $order->refresh()->payment_status);
+        $this->assertSame(InvoiceStatus::Paid->value, $order->invoice->refresh()->status);
+        $this->assertSame(2, $order->invoice->receipts()->count());
+    }
+
     public function test_settlement_journal_is_balanced(): void
     {
         $order = $this->createPayLaterOrder();

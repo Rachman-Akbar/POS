@@ -19,4 +19,14 @@ class ProductController extends Controller
 
         return response()->json(['data' => $products]);
     }
+
+    /**
+     * Toggle a product's favorite flag (managed from the Admin panel).
+     */
+    public function toggleFavorite(Product $product): JsonResponse
+    {
+        $product->update(['is_favorite' => ! $product->is_favorite]);
+
+        return response()->json(['data' => $product->fresh()]);
+    }
 }

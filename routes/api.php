@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AccountingController;
+use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\KitchenController;
 use App\Http\Controllers\Api\OrderController;
@@ -17,6 +18,7 @@ Route::get('/settings', [SettingsController::class, 'index']);
 
 // Product catalog
 Route::get('/products', [ProductController::class, 'index']);
+Route::patch('/products/{product}/favorite', [ProductController::class, 'toggleFavorite']);
 
 // Waiter / order flow
 Route::get('/orders', [OrderController::class, 'index']);
@@ -37,3 +39,16 @@ Route::post('/payments/orders/{order}/settle', [PaymentController::class, 'settl
 // Accounting
 Route::get('/accounting/journal', [AccountingController::class, 'journal']);
 Route::get('/accounting/chart-of-accounts', [AccountingController::class, 'chartOfAccounts']);
+
+// Admin control panel
+Route::get('/admin/settings', [AdminController::class, 'index']);
+Route::put('/admin/settings', [AdminController::class, 'update']);
+Route::get('/cash-bank-accounts', [AdminController::class, 'cashBankAccounts']);
+Route::post('/cash-bank-accounts', [AdminController::class, 'storeCashBankAccount']);
+Route::put('/cash-bank-accounts/{cashBankAccount}', [AdminController::class, 'updateCashBankAccount']);
+Route::delete('/cash-bank-accounts/{cashBankAccount}', [AdminController::class, 'destroyCashBankAccount']);
+
+Route::get('/payment-methods', [AdminController::class, 'paymentMethods']);
+Route::post('/payment-methods', [AdminController::class, 'storePaymentMethod']);
+Route::put('/payment-methods/{paymentMethod}', [AdminController::class, 'updatePaymentMethod']);
+Route::delete('/payment-methods/{paymentMethod}', [AdminController::class, 'destroyPaymentMethod']);

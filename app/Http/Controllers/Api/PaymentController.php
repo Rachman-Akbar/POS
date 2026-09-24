@@ -28,7 +28,7 @@ class PaymentController extends Controller
     public function pending(): JsonResponse
     {
         $invoices = SalesInvoice::where('status', InvoiceStatus::Issued->value)
-            ->with(['order' => fn ($query) => $query->with('items.product')])
+            ->with(['receipts', 'order' => fn ($query) => $query->with('items.product')])
             ->orderByDesc('issued_at')
             ->get();
 
@@ -42,12 +42,13 @@ class PaymentController extends Controller
     {
         $data = $request->validate([
             'payment_method' => ['required', 'string', 'max:25'],
+            'amount' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         try {
             $method = PaymentMethod::where('code', $data['payment_method'])->where('is_active', true)->first()
                 ?? throw new \DomainException('Metode pembayaran tidak ditemukan.');
-            $receipt = $this->salesService->settlePayment($order, $method);
+            $receipt = $this->salesService->settlePayment($order, $method, isset($data['amount']) ? (float) $data['amount'] : null);
         } catch (\DomainException $e) {
             return response()->json(['message' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -90,7 +91,7 @@ class PaymentController extends Controller
      */
     public function unpaidOrders(): JsonResponse
     {
-        $orders = Order::where('payment_status', PaymentStatus::Unpaid->value)
+        $orders = Order::whereIn('payment_status', [PaymentStatus::Unpaid->value, PaymentStatus::Partial->value])
             ->where('status', '!=', 'completed')
             ->with(['items.product'])
             ->orderBy('created_at')

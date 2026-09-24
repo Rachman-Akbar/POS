@@ -13,9 +13,9 @@ class PaymentMethodSeeder extends Seeder
     public function run(): void
     {
         $methods = [
-            ['code' => 'cash', 'name' => 'Tunai', 'mdr_rate' => 0.0000],
-            ['code' => 'bank', 'name' => 'Transfer Bank', 'mdr_rate' => 0.0030],
-            ['code' => 'qris', 'name' => 'QRIS', 'mdr_rate' => 0.0070],
+            ['code' => 'cash', 'type' => 'kas', 'name' => 'Tunai', 'mdr_rate' => 0.0000],
+            ['code' => 'bank', 'type' => 'bank', 'name' => 'Transfer Bank', 'mdr_rate' => 0.0000],
+            ['code' => 'qris', 'type' => 'qris', 'name' => 'QRIS', 'mdr_rate' => 0.0000],
         ];
 
         foreach ($methods as $method) {

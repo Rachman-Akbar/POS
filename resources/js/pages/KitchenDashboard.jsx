@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Flame, CookingPot, CheckCheck, BellRing, ListOrdered, ArrowRight } from 'lucide-react';
+import { Clock, Flame, CookingPot, CheckCheck, ListOrdered, ArrowRight } from 'lucide-react';
 import Layout from '../components/Layout';
 import { api } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
@@ -76,8 +76,6 @@ export default function KitchenDashboard() {
         });
         return [...grouped.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     }, [items]);
-
-    const totalItems = orders.reduce((sum, o) => sum + o.items.length, 0);
 
     const tabCounts = {
         pending: orders.filter((o) => ORDER_PROGRESS(o.items) === 'pending').length,
@@ -159,33 +157,19 @@ export default function KitchenDashboard() {
         );
     };
 
-    return (
-        <Layout
-            title="Kitchen Display"
-            subtitle="SPK pesanan dapur real-time"
-            right={
-                <span className="badge badge-cooking">
-                    <BellRing size={14} /> {orders.length} pesanan · {totalItems} item
-                </span>
-            }
-        >
-            <div className="flex items-center gap-2 mb-6 flex-wrap">
-                {[
-                    { key: 'pending', label: 'Menunggu', icon: Clock },
-                    { key: 'cooking', label: 'Diproses', icon: CookingPot },
-                    { key: 'done', label: 'Selesai', icon: CheckCheck },
-                ].map((t) => (
-                    <button
-                        key={t.key}
-                        onClick={() => setTab(t.key)}
-                        className={`btn border text-sm ${tab === t.key ? 'bg-orange-600 text-white border-orange-600' : 'border-gray-300 text-gray-600'}`}
-                    >
-                        <t.icon size={15} /> {t.label}
-                        <span className={`badge ml-1 ${tab === t.key ? 'bg-white/20 text-white' : 'badge-pending'}`}>{tabCounts[t.key]}</span>
-                    </button>
-                ))}
-            </div>
+    const header = {
+        navLabel: 'Dapur',
+        navItems: [
+            { key: 'pending', label: 'Menunggu', icon: Clock, count: tabCounts.pending },
+            { key: 'cooking', label: 'Diproses', icon: CookingPot, count: tabCounts.cooking },
+            { key: 'done', label: 'Selesai', icon: CheckCheck, count: tabCounts.done },
+        ],
+        activeNav: tab,
+        onNavChange: setTab,
+    };
 
+    return (
+        <Layout header={header}>
             {isLoading ? (
                 <div className="card text-muted">Memuat SPK...</div>
             ) : visibleOrders.length === 0 ? (
