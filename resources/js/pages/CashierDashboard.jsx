@@ -177,7 +177,7 @@ export default function CashierDashboard() {
     };
 
     const settle = async (invoice) => {
-        const method = selected[invoice.order.id] ?? 'cash';
+        const method = selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash';
         try {
             await api.post(`/payments/orders/${invoice.order.id}/settle`, { payment_method: method });
             notifySuccess(`Pembayaran ${invoice.invoice_number} berhasil.`);
@@ -298,9 +298,9 @@ export default function CashierDashboard() {
                                 <p className="text-muted text-sm text-center py-10">Keranjang kosong. Tambahkan produk dari halaman Pesanan.</p>
                             ) : (
                                 <>
-                                    <div className="border border-gray-100 rounded-xl overflow-hidden mb-4">
+                                    <div className="border border-gray-100 rounded-xl overflow-hidden mb-4 bg-white">
                                         <table className="w-full">
-                                            <thead className="bg-gray-50/70">
+                                            <thead className="bg-gray-100">
                                                 <tr>
                                                     <th className="table-head">Produk</th>
                                                     <th className="table-head text-right">Harga</th>
@@ -328,7 +328,7 @@ export default function CashierDashboard() {
                                                     </tr>
                                                 ))}
                                             </tbody>
-                                            <tfoot className="bg-gray-50/70 border-t border-gray-100">
+                                            <tfoot className="bg-gray-100 border-t border-gray-100">
                                                 <tr>
                                                     <td className="table-cell font-bold" colSpan={3}>Subtotal</td>
                                                     <td className="table-cell font-bold text-right">{formatIDR(totals.subtotal)}</td>
@@ -356,72 +356,65 @@ export default function CashierDashboard() {
                     {pending.length === 0 ? (
                         <div className="card text-muted text-center py-10">Tidak ada draft menunggu pelunasan.</div>
                     ) : (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
-                            {pending.map((invoice) => {
-                                const received = (invoice.receipts ?? []).reduce((sum, r) => sum + Number(r.gross_amount), 0);
-                                const remaining = Number(invoice.total_amount) - received;
-                                return (
-                                    <div key={invoice.id} className="card">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <div className="font-bold">{invoice.invoice_number}</div>
-                                                <div className="text-xs text-muted">{invoice.order?.order_number} · Meja {invoice.order?.table_number ?? '-'}</div>
-                                            </div>
-                                            <span className={`badge ${received > 0 ? 'badge-cooking' : 'badge-unpaid'}`}>
-                                                {received > 0 ? 'Bayar Sebagian' : 'Belum Bayar'}
-                                            </span>
-                                        </div>
-
-                                        <div className="my-3 bg-gray-50 rounded-lg p-3">
-                                            {invoice.order?.items?.map((item) => (
-                                                <div key={item.id} className="flex justify-between text-sm py-0.5">
-                                                    <span>{item.qty} × {item.product?.name}</span>
-                                                    <span className="text-muted">{formatIDR(Number(item.price) * item.qty)}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-
-                                        <div className="space-y-1 mb-3 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="text-muted">Total Tagihan</span>
-                                                <span className="font-semibold">{formatIDR(invoice.total_amount)}</span>
-                                            </div>
-                                            {received > 0 && (
-                                                <>
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted">Terbayar</span>
-                                                        <span className="text-emerald-700">{formatIDR(received)}</span>
+                        <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
+                            <table className="w-full">
+                                <thead className="bg-gray-100">
+                                    <tr>
+                                        <th className="table-head">Faktur</th>
+                                        <th className="table-head">Pesanan</th>
+                                        <th className="table-head text-right">Total</th>
+                                        <th className="table-head text-right">Terbayar</th>
+                                        <th className="table-head text-right">Sisa</th>
+                                        <th className="table-head text-center">Status</th>
+                                        <th className="table-head text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {pending.map((invoice) => {
+                                        const received = (invoice.receipts ?? []).reduce((sum, r) => sum + Number(r.gross_amount), 0);
+                                        const remaining = Number(invoice.total_amount) - received;
+                                        const method = selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash';
+                                        return (
+                                            <tr key={invoice.id}>
+                                                <td className="table-cell">
+                                                    <div className="font-semibold text-xs">{invoice.invoice_number}</div>
+                                                    <div className="text-xs text-muted">{invoice.order?.order_number}</div>
+                                                </td>
+                                                <td className="table-cell">
+                                                    <div className="text-xs text-muted">Meja {invoice.order?.table_number ?? '-'}</div>
+                                                    <div className="text-xs text-muted max-w-[16rem] truncate">
+                                                        {invoice.order?.items?.map((i) => `${i.qty}× ${i.product?.name}`).join(', ')}
                                                     </div>
-                                                    <div className="flex justify-between font-bold">
-                                                        <span>Sisa</span>
-                                                        <span className="text-orange-600 text-lg">{formatIDR(remaining)}</span>
+                                                </td>
+                                                <td className="table-cell text-right font-semibold whitespace-nowrap">{formatIDR(invoice.total_amount)}</td>
+                                                <td className="table-cell text-right text-emerald-700 whitespace-nowrap">{formatIDR(received)}</td>
+                                                <td className="table-cell text-right font-bold text-orange-600 whitespace-nowrap">{formatIDR(remaining)}</td>
+                                                <td className="table-cell text-center">
+                                                    <span className={`badge ${received > 0 ? 'badge-cooking' : 'badge-unpaid'}`}>
+                                                        {received > 0 ? 'Bayar Sebagian' : 'Belum Bayar'}
+                                                    </span>
+                                                </td>
+                                                <td className="table-cell">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <select
+                                                            value={method}
+                                                            onChange={(e) => setSelected((s) => ({ ...s, [invoice.order.id]: e.target.value }))}
+                                                            className="select !w-auto !py-1.5 text-xs"
+                                                        >
+                                                            {payMethods.map((m) => (
+                                                                <option key={m.code} value={m.code}>{m.name}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button onClick={() => settle(invoice)} className="btn btn-success !py-1.5 whitespace-nowrap">
+                                                            <CheckCircle2 size={14} /> Terima
+                                                        </button>
                                                     </div>
-                                                </>
-                                            )}
-                                        </div>
-
-                                        <div className="flex flex-wrap gap-2 mb-3">
-                                            {payMethods.map((m) => (
-                                                <button
-                                                    key={m.code}
-                                                    onClick={() => setSelected((s) => ({ ...s, [invoice.order.id]: m.code }))}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                                                        selected[invoice.order.id] === m.code
-                                                            ? 'bg-orange-600 text-white'
-                                                            : 'bg-gray-100 text-muted hover:bg-gray-200'
-                                                    }`}
-                                                >
-                                                    {m.name}
-                                                </button>
-                                            ))}
-                                        </div>
-
-                                        <button onClick={() => settle(invoice)} className="btn btn-success w-full justify-center">
-                                            <CheckCircle2 size={16} /> Terima Pembayaran
-                                        </button>
-                                    </div>
-                                );
-                            })}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     )}
                 </div>
@@ -432,9 +425,9 @@ export default function CashierDashboard() {
                     {today.length === 0 ? (
                         <div className="card text-muted text-center py-10">Belum ada transaksi hari ini.</div>
                     ) : (
-                        <div className="border border-gray-100 rounded-xl overflow-hidden">
+                        <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                             <table className="w-full">
-                                <thead className="bg-gray-50/70">
+                                <thead className="bg-gray-100">
                                     <tr>
                                         <th className="table-head">Faktur</th>
                                         <th className="table-head">Metode</th>
@@ -459,7 +452,7 @@ export default function CashierDashboard() {
                                         </tr>
                                     ))}
                                 </tbody>
-                                <tfoot className="bg-gray-50/70 border-t border-gray-100">
+                                <tfoot className="bg-gray-100 border-t border-gray-100">
                                     <tr>
                                         <td className="table-cell font-bold" colSpan={2}>Total Net (Kasir)</td>
                                         <td className="table-cell font-bold text-right text-emerald-700">{formatIDR(totalToday)}</td>
@@ -506,7 +499,9 @@ function CheckoutPanel({
         if (paid >= totalAmount) {
             status = { text: 'Lunas', cls: 'badge-paid' };
         } else if (paid > 0) {
-            status = { text: `Kurang ${formatIDR(totalAmount - paid)}`, cls: 'badge-unpaid' };
+            status = enablePrepay
+                ? { text: 'Belum Lunas', cls: 'badge-unpaid' }
+                : { text: `Kurang ${formatIDR(totalAmount - paid)}`, cls: 'badge-unpaid' };
         } else {
             status = { text: 'Belum Bayar', cls: 'badge-unpaid' };
         }
@@ -538,22 +533,13 @@ function CheckoutPanel({
                 <div className="flex items-center gap-3">
                     <span className="label w-28 shrink-0 !mb-0">Diskon</span>
                     <div className="flex-1 flex items-center gap-2">
-                        <div className="flex rounded-lg border border-gray-200 p-0.5 shrink-0">
-                            <button
-                                onClick={() => setDiscountType('percent')}
-                                className={`w-9 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${discountType === 'percent' ? 'bg-orange-600 text-white' : 'text-muted hover:bg-gray-50'}`}
-                                title="Diskon persen (%)"
-                            >
-                                %
-                            </button>
-                            <button
-                                onClick={() => setDiscountType('amount')}
-                                className={`w-9 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${discountType === 'amount' ? 'bg-orange-600 text-white' : 'text-muted hover:bg-gray-50'}`}
-                                title="Diskon nominal (Rp)"
-                            >
-                                Rp
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => setDiscountType((t) => (t === 'percent' ? 'amount' : 'percent'))}
+                            title={discountType === 'percent' ? 'Diskon persen (%) — klik untuk Rupiah' : 'Diskon nominal (Rp) — klik untuk persen'}
+                            className="w-10 py-2.5 rounded-lg text-xs font-bold shrink-0 cursor-pointer bg-orange-600 text-white hover:bg-orange-700 transition-colors"
+                        >
+                            {discountType === 'percent' ? '%' : 'Rp'}
+                        </button>
                         {discountType === 'percent' ? (
                             <div className="relative flex-1">
                                 <input type="number" min="0" max="100" className="input pr-10" value={discountRaw} onChange={(e) => setDiscountRaw(e.target.value)} placeholder="0" />
@@ -605,9 +591,16 @@ function CheckoutPanel({
                     </div>
                 </div>
 
-                {(change > 0 || enablePrepay) && (
-                    <p className="text-[11px] text-muted text-right -mt-2">
-                        {change > 0 ? `Kembalian ${formatIDR(change)}` : 'Nominal boleh kurang dari total (bayar sebagian).'}
+                {change > 0 && (
+                    <p className="text-[11px] text-muted text-right -mt-2">Kembalian {formatIDR(change)}</p>
+                )}
+                {paid > 0 && paid < totalAmount && (
+                    <p className="text-[11px] text-right -mt-2">
+                        {enablePrepay ? (
+                            <span className="text-muted">Bayar sebagian diperbolehkan — status Belum Lunas.</span>
+                        ) : (
+                            <span className="text-red-500">Nominal harus melebihi total tagihan.</span>
+                        )}
                     </p>
                 )}
 

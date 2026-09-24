@@ -43,9 +43,9 @@ const CardItem = ({ product, onOpen, onAdd, showStock }) => {
 };
 
 const TableView = ({ items, onOpen, onAdd, showStock }) => (
-    <div className="border border-gray-100 rounded-xl overflow-hidden">
+    <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
         <table className="w-full">
-            <thead className="bg-gray-50/70">
+            <thead className="bg-gray-100">
                 <tr>
                     <th className="table-head">Produk</th>
                     <th className="table-head text-right">Harga</th>
@@ -244,7 +244,7 @@ export default function ProductCatalog({ products = [], onAdd, mode, onModeChang
 
             {showFavorites && (
                 <section>
-                    <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                         <SectionHeader title="Favorit" open={!collapsed.favorites} onToggle={() => toggleSection('favorites')} />
                         {!collapsed.favorites && (
                             <div className="p-3">
@@ -270,7 +270,7 @@ export default function ProductCatalog({ products = [], onAdd, mode, onModeChang
             )}
 
             {Object.entries(grouped).map(([category, items]) => (
-                <div key={category} className="border border-gray-100 rounded-xl overflow-hidden">
+                <div key={category} className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                     <SectionHeader title={category} open={!collapsed[`cat:${category}`]} onToggle={() => toggleSection(`cat:${category}`)} />
                     {!collapsed[`cat:${category}`] && (
                         <div className="p-3">

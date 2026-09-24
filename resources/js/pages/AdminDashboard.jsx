@@ -221,9 +221,9 @@ export default function AdminDashboard() {
                         {products.length === 0 ? (
                             <p className="text-muted text-sm text-center py-8">Belum ada produk aktif.</p>
                         ) : (
-                            <div className="border border-gray-100 rounded-xl overflow-hidden">
+                            <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                                 <table className="w-full">
-                                    <thead className="bg-gray-50/70">
+                                    <thead className="bg-gray-100">
                                         <tr>
                                             <th className="table-head">Produk</th>
                                             <th className="table-head">Kategori</th>
@@ -283,9 +283,9 @@ export default function AdminDashboard() {
                         {methods.length === 0 ? (
                             <p className="text-muted text-sm text-center py-8">Belum ada metode pembayaran.</p>
                         ) : (
-                            <div className="border border-gray-100 rounded-xl overflow-hidden">
+                            <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                                 <table className="w-full">
-                                    <thead className="bg-gray-50/70">
+                                    <thead className="bg-gray-100">
                                         <tr>
                                             <th className="table-head">Metode</th>
                                             <th className="table-head">Jenis</th>
@@ -347,9 +347,9 @@ export default function AdminDashboard() {
                         {accounts.length === 0 ? (
                             <p className="text-muted text-sm text-center py-8">Belum ada akun. Tambahkan akun kas atau bank pertama.</p>
                         ) : (
-                            <div className="border border-gray-100 rounded-xl overflow-hidden">
+                            <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
                                 <table className="w-full">
-                                    <thead className="bg-gray-50/70">
+                                    <thead className="bg-gray-100">
                                         <tr>
                                             <th className="table-head">Akun</th>
                                             <th className="table-head">Tipe</th>

@@ -18,7 +18,7 @@ export default function ViewModeSwitch({ value = 'grid', onChange, className = '
             onClick={() => onChange?.(next.key)}
             title={`Tampilan: ${current.label} — klik untuk ${next.label}`}
             aria-label={`Ganti tampilan, saat ini ${current.label}`}
-            className={`btn-icon w-9 h-9 !rounded-lg bg-orange-600 text-white hover:bg-orange-700 shrink-0 ${className}`}
+            className={`btn-icon w-9 h-9 !rounded-lg !bg-orange-600 !text-white hover:!bg-orange-700 shrink-0 ${className}`}
         >
             <Icon size={16} />
         </button>

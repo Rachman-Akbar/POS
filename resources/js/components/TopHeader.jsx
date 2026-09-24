@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    Search, Menu, CheckCircle2, ChevronDown, ChefHat, Receipt, ShieldCheck, UtensilsCrossed,
+    Search, CheckCircle2, ChevronDown, ChefHat, Receipt, ShieldCheck, UtensilsCrossed,
 } from 'lucide-react';
 import ViewModeSwitch from './ViewModeSwitch';
 
@@ -52,6 +52,7 @@ export default function TopHeader({
     const navRef = useClickOutside(() => setNavOpen(false));
     const profileRef = useClickOutside(() => setProfileOpen(false));
     const role = currentRole(pathname);
+    const dropdownLabel = navItems.find((item) => item.key === activeNav)?.label ?? navLabel;
 
     const goRole = (path) => {
         setProfileOpen(false);
@@ -80,7 +81,7 @@ export default function TopHeader({
                 {navItems.length > 0 && (
                     <div className="relative shrink-0" ref={navRef}>
                         <button onClick={() => setNavOpen((v) => !v)} className="btn btn-ghost !px-3">
-                            <Menu size={16} /> <span className="hidden sm:inline">{navLabel}</span>
+                            <span>{dropdownLabel}</span>
                             <ChevronDown size={14} className={`transition-transform ${navOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {navOpen && (
@@ -96,7 +97,6 @@ export default function TopHeader({
                                             activeNav === item.key ? 'bg-orange-50 text-orange-700 font-semibold' : 'hover:bg-gray-50'
                                         }`}
                                     >
-                                        {item.icon && <item.icon size={15} />}
                                         {item.label}
                                         {item.count !== undefined && (
                                             <span className="ml-auto text-[11px] font-bold text-muted">{item.count}</span>
@@ -115,7 +115,7 @@ export default function TopHeader({
 
                 {onCheckOrders && (
                     <button onClick={onCheckOrders} className="btn btn-ghost shrink-0 relative">
-                        <Receipt size={16} /> <span className="hidden md:inline">Cek Pesanan</span>
+                        <span className="hidden md:inline">Cek Pesanan</span>
                         {orderCount > 0 && (
                             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-600 text-white text-[10px] font-bold flex items-center justify-center">
                                 {orderCount}
@@ -130,12 +130,12 @@ export default function TopHeader({
                         className="flex items-center gap-2 py-1.5 pl-1.5 pr-2 rounded-lg hover:bg-gray-50 transition-colors"
                         title="Akun & ganti peran (simulasi)"
                     >
-                        <span className="w-8 h-8 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center uppercase">
-                            {role.user.name[0]}
-                        </span>
                         <span className="hidden md:block text-left leading-tight">
                             <span className="block text-sm font-semibold">{role.user.name}</span>
                             <span className="block text-[10px] text-muted">{role.user.jabatan}</span>
+                        </span>
+                        <span className="w-8 h-8 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center uppercase">
+                            {role.user.name[0]}
                         </span>
                         <ChevronDown size={14} className={`text-muted transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
                     </button>
