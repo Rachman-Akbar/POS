@@ -10,7 +10,6 @@ use App\Http\Controllers\Controller;
 use App\Models\OrderItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 
 class KitchenController extends Controller
 {
@@ -39,23 +38,17 @@ class KitchenController extends Controller
     }
 
     /**
-     * Kitchen moves a single order item along the production flow.
+     * Kitchen sets a single order item's status manually
+     * (any allowed status can be selected, including going back).
      */
     public function updateItemStatus(Request $request, OrderItem $item): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:cooking,sent,done'],
+            'status' => ['required', 'in:pending,cooking,sent,done'],
         ]);
 
-        $current = ItemStatus::from($item->status);
-        $next = ItemStatus::from($data['status']);
-
-        if ($current === ItemStatus::Done || $next !== $current->next()) {
-            return response()->json(['message' => 'Transisi status tidak valid untuk item ini.'], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
         $previous = $item->status;
-        $item->update(['status' => $next->value]);
+        $item->update(['status' => $data['status']]);
 
         $this->safeBroadcast(new ItemStatusUpdated($item->fresh(), $previous));
 

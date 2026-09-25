@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Flame, CookingPot, CheckCheck, ListOrdered, ArrowRight, Table2, LayoutGrid, X, Send } from 'lucide-react';
+import { Clock, CookingPot, CheckCheck, ListOrdered, ArrowRight, Table2, LayoutGrid, ChevronRight, ChevronDown, X, Send, Folder, FolderOpen, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
 import { api } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
 import { notifyError } from '../utils/alerts';
-import { ItemStatusBadge } from '../components/badges';
-
-const ITEM_STATUS_META = {
-    pending: { icon: Flame, label: 'Mulai Masak', next: 'cooking', btn: 'btn-warning' },
-    cooking: { icon: Send, label: 'Kirim', next: 'sent', btn: 'btn-warning' },
-    sent: { icon: CheckCheck, label: 'Tandai Selesai', next: 'done', btn: 'btn-success' },
-    done: { icon: CheckCheck, label: 'Selesai', next: null, btn: '' },
-};
+import { ItemStatusBadge, ITEM_STATUS } from '../components/badges';
 
 const STAGES = [
     { key: 'pending', label: 'Dipesan', band: 'bg-gray-600', icon: Clock },
@@ -36,11 +29,20 @@ const KITCHEN_MODES = [
     { key: 'table', label: 'Tabel', icon: Table2 },
 ];
 
+const formatTime = (value, withDate = false) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    const options = { hour: '2-digit', minute: '2-digit' };
+    if (withDate) options.day = '2-digit', options.month = 'short';
+    return date.toLocaleTimeString('id-ID', options);
+};
+
 export default function KitchenDashboard() {
     const queryClient = useQueryClient();
     const [query, setQuery] = useState('');
     const [view, setView] = useState('board');
     const [selectedId, setSelectedId] = useState(null);
+    const [collapsedKeys, setCollapsedKeys] = useState({});
 
     const { data: items = { waiting: [], cooking: [], sent: [], done: [] }, isLoading } = useQuery({
         queryKey: ['kitchen-items'],
@@ -90,22 +92,24 @@ export default function KitchenDashboard() {
         return [...grouped.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     }, [items]);
 
-const boardGroups = STAGES.map((stage) => ({
+    const boardGroups = STAGES.map((stage) => ({
         ...stage,
         orders: orders.filter((o) => o.items.some((i) => i.status === stage.key)),
     }));
 
-const filteredOrders = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? orders.filter((o) => o.order_number.toLowerCase().includes(q)) : orders;
-}, [orders, query]);
+    const filteredOrders = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return q ? orders.filter((o) => o.order_number.toLowerCase().includes(q)) : orders;
+    }, [orders, query]);
 
-    const advance = async (item, status) => {
+    const updateStatus = async (item, status) => {
+        if (item.status === status) return;
+
         queryClient.setQueryData(['kitchen-items'], (old) => {
             if (!old) return old;
-            const updated = { ...old, waiting: [...old.waiting], cooking: [...old.cooking], done: [...old.done] };
-            Object.keys(updated).forEach((group) => {
-                updated[group] = updated[group].map((i) => (i.id === item.id ? { ...i, status } : i));
+            const updated = {};
+            Object.keys(old).forEach((group) => {
+                updated[group] = old[group].map((i) => (i.id === item.id ? { ...i, status } : i));
             });
             return updated;
         });
@@ -118,14 +122,17 @@ const filteredOrders = useMemo(() => {
         }
     };
 
+    const toggleCollapsed = (orderId) => {
+        setCollapsedKeys((m) => ({ ...m, [orderId]: !m[orderId] }));
+    };
+
     const renderItemRow = (item) => {
-        const meta = ITEM_STATUS_META[item.status];
         return (
             <div key={item.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
                 <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm truncate">{item.product?.name}</div>
                     <div className="text-xs text-muted flex items-center gap-1">
-                        <Clock size={11} /> {new Date(item.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                        <Clock size={11} /> {formatTime(item.created_at)}
                     </div>
                 </div>
 
@@ -133,47 +140,48 @@ const filteredOrders = useMemo(() => {
                     <span className="text-orange-600 font-black text-base">{item.qty}×</span>
                 </span>
 
-                {meta.next ? (
-                    <button onClick={() => advance(item, meta.next)} className={`btn ${meta.btn} !px-3 !py-1.5 shrink-0`}>
-                        <meta.icon size={15} /> {meta.label}
-                    </button>
-                ) : (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 text-sm font-bold shrink-0">
-                        <CheckCheck size={15} /> Selesai
-                    </span>
-                )}
+                <ItemStatusBadge status={item.status} />
             </div>
         );
     };
 
-const renderOrder = (order, stage) => {
-    return (
-        <div key={order.id} className="card !p-0 overflow-hidden border-t-4 border-t-transparent border-gray-200/80">
-            <button
-                type="button"
-                onClick={() => setSelectedId(order.id)}
-                className={`w-full flex items-center justify-between px-4 py-2 ${stage.band} text-white text-xs font-bold rounded-t-2xl cursor-pointer`}
-                title="Lihat detail pesanan"
-            >
-                <span className="flex items-center gap-1.5">
-                    <ListOrdered size={13} /> {order.order_number}
-                </span>
-                <span>Meja {order.table_number ?? '-'}</span>
-            </button>
+    const renderOrder = (order, stage) => {
+        const doneCount = order.items.filter((i) => i.status === 'done').length;
+        return (
+            <div key={order.id} className="card !p-0 overflow-hidden border-t-4 border-t-transparent border-gray-200/80">
+                <div
+                    role="button"
+                    tabIndex="0"
+                    onClick={() => setSelectedId(order.id)}
+                    onKeyDown={(e) => e.key === 'Enter' && setSelectedId(order.id)}
+                    className={`w-full flex items-center justify-between px-4 py-2 ${stage.band} text-white text-xs font-bold rounded-t-2xl cursor-pointer`}
+                    title="Lihat detail pesanan"
+                >
+                    <span className="flex items-center gap-1.5">
+                        <ListOrdered size={13} /> {order.order_number}
+                    </span>
+                    <span>Meja {order.table_number ?? '-'}</span>
+                </div>
 
-            <div className="p-4 space-y-2">
-                {order.items.filter((i) => i.status === stage.key).map(renderItemRow)}
-            </div>
+                <div className="p-4 space-y-2">
+                    {order.items.filter((i) => i.status === stage.key).map(renderItemRow)}
+                </div>
 
-            <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl">
-                <span className="text-xs text-muted font-semibold">{stage.label}</span>
-                <span className="text-xs text-muted">
-                    {order.items.filter((i) => i.status === 'done').length}/{order.items.length} selesai
-                </span>
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl">
+                    <span className="text-xs text-muted font-semibold">
+                        {stage.label} · {doneCount}/{order.items.length} selesai
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => setSelectedId(order.id)}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                        Detail <ArrowRight size={12} />
+                    </button>
+                </div>
             </div>
-        </div>
-    );
-};
+        );
+    };
 
     const renderGroupedTable = () => {
         if (filteredOrders.length === 0) {
@@ -185,73 +193,95 @@ const renderOrder = (order, stage) => {
         }
 
         return (
-            <div className="space-y-4">
-                {filteredOrders.map((order) => {
-                    const meta = STAGES.find((s) => s.key === orderStage(order)) ?? STAGES[0];
-                    const doneCount = order.items.filter((i) => i.status === 'done').length;
-                    return (
-                        <div key={order.id} className="border border-gray-100 rounded-xl overflow-hidden bg-white">
-                            <div className={`flex items-center gap-2 flex-wrap px-4 py-2.5 ${meta.band} text-white text-xs font-bold`}>
-                                <button
-                                    type="button"
-                                    onClick={() => setSelectedId(order.id)}
-                                    className="flex items-center gap-1.5 cursor-pointer hover:underline"
-                                    title="Lihat detail pesanan"
-                                >
-                                    <ListOrdered size={14} /> {order.order_number}
-                                </button>
-                                <span className="text-white/90">Meja {order.table_number ?? '-'}</span>
-                                <span className="text-white/90">· {doneCount}/{order.items.length} selesai</span>
-                                <button
-                                    onClick={() => setSelectedId(order.id)}
-                                    className="ml-auto rounded-lg bg-white/20 hover:bg-white/30 px-2.5 py-1 cursor-pointer transition-colors"
-                                >
-                                    Detail
-                                </button>
-                            </div>
+            <div className="border border-gray-200/80 rounded-2xl overflow-hidden bg-white shadow-sm">
+                <table className="w-full">
+                    <thead className="bg-gray-100/80">
+                        <tr>
+                            <th className="table-head">Pesanan</th>
+                            <th className="table-head text-center">Qty</th>
+                            <th className="table-head text-center">Meja</th>
+                            <th className="table-head text-center">Waktu</th>
+                            <th className="table-head text-center">Status</th>
+                            <th className="table-head text-right">Aksi</th>
+                        </tr>
+                    </thead>
 
-                            <table className="w-full">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="table-head">Menu</th>
-                                        <th className="table-head text-center">Qty</th>
-                                        <th className="table-head text-center">Waktu</th>
-                                        <th className="table-head">Status</th>
-                                        <th className="table-head text-right">Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                    {order.items.map((item) => {
-                                        const itemMeta = ITEM_STATUS_META[item.status];
-                                        return (
-                                            <tr key={item.id}>
-                                                <td className="table-cell font-semibold">{item.product?.name}</td>
-                                                <td className="table-cell text-center font-black text-orange-600">{item.qty}×</td>
-                                                <td className="table-cell text-center text-xs text-muted whitespace-nowrap">
-                                                    {new Date(item.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                                                </td>
-                                                <td className="table-cell">
-                                                    <ItemStatusBadge status={item.status} />
-                                                </td>
-                                                <td className="table-cell text-right">
-                                                    {itemMeta.next ? (
-                                                        <button onClick={() => advance(item, itemMeta.next)} className={`btn ${itemMeta.btn} !px-3 !py-1.5 text-xs whitespace-nowrap`}>
-                                                            <itemMeta.icon size={13} /> {itemMeta.label}
-                                                        </button>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-bold">
-                                                            <CheckCheck size={14} /> Selesai
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    );
-                })}
+                    {filteredOrders.map((order) => {
+                        const meta = STAGES.find((s) => s.key === orderStage(order)) ?? STAGES[0];
+                        const doneCount = order.items.filter((i) => i.status === 'done').length;
+                        const totalQty = order.items.reduce((sum, i) => sum + i.qty, 0);
+                        const open = !collapsedKeys[order.id];
+                        const FolderIcon = open ? FolderOpen : Folder;
+
+                        return (
+                            <tbody key={order.id} className="border-t border-gray-100 align-top">
+                                <tr
+                                    className={`${meta.band} text-white cursor-pointer select-none`}
+                                    onClick={() => toggleCollapsed(order.id)}
+                                    title={open ? 'Tutup folder pesanan' : 'Buka folder pesanan'}
+                                >
+                                    <td className="px-4 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                            {open ? <ChevronDown size={15} className="shrink-0" /> : <ChevronRight size={15} className="shrink-0" />}
+                                            <FolderIcon size={15} className="shrink-0" />
+                                            <span className="font-black tracking-wide">{order.order_number}</span>
+                                            <span className="text-white/80 text-[11px] font-semibold">
+                                                {doneCount}/{order.items.length} selesai
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-center font-bold">{totalQty}</td>
+                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">Meja {order.table_number ?? '-'}</td>
+                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">{formatTime(order.created_at, true)}</td>
+                                    <td className="px-4 py-2.5 text-center">
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-bold">
+                                            <meta.icon size={12} /> {meta.label}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedId(order.id);
+                                            }}
+                                            className="rounded-lg bg-white/20 hover:bg-white/30 px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors"
+                                        >
+                                            Detail
+                                        </button>
+                                    </td>
+                                </tr>
+
+                                {open &&
+                                    order.items.map((item) => (
+                                        <tr key={item.id} className="border-t border-gray-50 hover:bg-orange-50/30">
+                                            <td className="table-cell">
+                                                <div className="flex items-center gap-2 pl-7">
+                                                    <FileText size={13} className="text-gray-300 shrink-0" />
+                                                    <span className="font-semibold">{item.product?.name}</span>
+                                                </div>
+                                            </td>
+                                            <td className="table-cell text-center font-black text-orange-600">{item.qty}×</td>
+                                            <td className="table-cell text-center text-xs text-muted">-</td>
+                                            <td className="table-cell text-center text-xs text-muted whitespace-nowrap">{formatTime(item.created_at)}</td>
+                                            <td className="table-cell text-center">
+                                                <ItemStatusBadge status={item.status} />
+                                            </td>
+                                            <td className="table-cell text-right">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedId(order.id)}
+                                                    className="text-xs font-bold text-orange-600 hover:underline cursor-pointer"
+                                                >
+                                                    Detail
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                            </tbody>
+                        );
+                    })}
+                </table>
             </div>
         );
     };
@@ -262,6 +292,7 @@ const renderOrder = (order, stage) => {
         if (!selectedOrder) return null;
         const meta = STAGES.find((s) => s.key === orderStage(selectedOrder)) ?? STAGES[0];
         const doneCount = selectedOrder.items.filter((i) => i.status === 'done').length;
+
         return (
             <div
                 className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
@@ -281,12 +312,42 @@ const renderOrder = (order, stage) => {
                     </div>
 
                     <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
-                        <span className="text-sm font-semibold">Meja {selectedOrder.table_number ?? '-'}</span>
+                        <div className="text-sm font-semibold">
+                            Meja {selectedOrder.table_number ?? '-'}
+                            <span className="block text-[11px] text-muted font-normal">{formatTime(selectedOrder.created_at, true)}</span>
+                        </div>
                         <span className="text-xs text-muted">{doneCount}/{selectedOrder.items.length} selesai</span>
                     </div>
 
+                    <div className="px-4 pt-3 pb-1">
+                        <span className="text-[11px] font-bold text-muted uppercase tracking-wide">Ubah status menu secara manual</span>
+                    </div>
+
                     <div className="p-4 space-y-2">
-                        {selectedOrder.items.map(renderItemRow)}
+                        {selectedOrder.items.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-sm truncate">{item.product?.name}</div>
+                                    <div className="text-xs text-muted flex items-center gap-2">
+                                        <span className="flex items-center gap-1">
+                                            <Clock size={11} /> {formatTime(item.created_at)}
+                                        </span>
+                                        <span className="text-orange-600 font-black">{item.qty}×</span>
+                                    </div>
+                                </div>
+
+                                <select
+                                    value={item.status}
+                                    onChange={(e) => updateStatus(item, e.target.value)}
+                                    className="input !py-2 !px-2 text-sm font-semibold shrink-0"
+                                    title="Ubah status secara manual"
+                                >
+                                    {Object.entries(ITEM_STATUS).map(([key, meta]) => (
+                                        <option key={key} value={key}>{meta.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
@@ -298,7 +359,7 @@ const renderOrder = (order, stage) => {
         mode: view,
         onModeChange: setView,
         viewModes: KITCHEN_MODES,
-        showCatalog: view === 'table',
+        showCatalog: true,
         query,
         onQueryChange: setQuery,
         searchPlaceholder: 'Cari no pesanan...',
@@ -335,7 +396,7 @@ const renderOrder = (order, stage) => {
             )}
 
             <div className="mt-6 flex items-center gap-2 text-muted text-sm">
-                <ArrowRight size={16} /> Ubah status menu satu per satu di dalam kartu pesanan: Dipesan → Diproses → Dikirim → Selesai.
+                <ArrowRight size={16} /> Klik Detail pada pesanan untuk mengubah status menu secara manual (Dipesan → Diproses → Dikirim → Selesai).
             </div>
 
             {renderDetailModal()}

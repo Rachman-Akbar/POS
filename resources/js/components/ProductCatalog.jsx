@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ImageOff, Plus, Star, Package, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { formatIDR } from '../api/client';
 import ProductDetailModal from './ProductDetailModal';
@@ -93,74 +93,80 @@ const TableView = ({ items, onOpen, onAdd, showStock }) => (
 );
 
 const HeroView = ({ items, onOpen, onAdd, showStock }) => {
-    const ref = useRef(null);
+    const VISIBLE = 5;
     const [active, setActive] = useState(0);
+    const [start, setStart] = useState(0);
 
     useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const onScroll = () => {
-            const per = el.clientWidth || 1;
-            setActive(Math.max(0, Math.min(items.length - 1, Math.round(el.scrollLeft / per))));
-        };
-        el.addEventListener('scroll', onScroll, { passive: true });
-        return () => el.removeEventListener('scroll', onScroll);
+        setActive(0);
+        setStart(0);
     }, [items.length]);
+
+    useEffect(() => {
+        const index = Math.min(active, items.length - 1);
+        if (index < start) {
+            setStart(Math.max(0, index));
+        } else if (index >= start + VISIBLE) {
+            setStart(Math.max(0, Math.min(items.length - VISIBLE, index - VISIBLE + 1)));
+        }
+    }, [active, items.length, start, VISIBLE]);
 
     if (items.length === 0) return null;
 
-    const scrollTo = (index) => {
-        const el = ref.current;
-        el?.scrollTo({ left: index * el.clientWidth, behavior: 'smooth' });
-    };
+    const product = items[active];
+    const out = product.stock <= 0;
+    const go = (delta) => setActive((a) => Math.min(items.length - 1, Math.max(0, a + delta)));
+    const visibleThumbs = items.slice(start, start + VISIBLE);
 
     return (
         <div className="flex flex-col gap-2" style={{ height: 'calc(100dvh - 9.5rem)' }}>
-            <div className="relative flex-1 min-h-0">
-                <div ref={ref} className="absolute inset-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-none rounded-xl">
-                    {items.map((product) => {
-                        const out = product.stock <= 0;
-                        return (
-                            <div key={product.id} className="min-w-full snap-start relative cursor-pointer" onClick={() => !out && onOpen(product)}>
-                                <ProductImage product={product} className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                                <span className="absolute top-4 left-4 badge bg-white/90 text-gray-700">{product.category ?? 'Lainnya'} {product.is_favorite ? '· Favorit' : ''}</span>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (!out) onAdd(product);
-                                    }}
-                                    disabled={out}
-                                    title={out ? 'Stok habis' : 'Tambah ke transaksi'}
-                                    className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white text-orange-600 border border-gray-200 hover:bg-orange-600 hover:text-white hover:border-orange-600 flex items-center justify-center transition-colors disabled:opacity-50"
-                                >
-                                    <Plus size={20} />
-                                </button>
-                                <div className="absolute left-4 right-4 bottom-4 text-white">
-                                    <div className="text-lg font-bold leading-snug">{product.name}</div>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <span className="text-orange-400 font-bold">{formatIDR(product.price)}</span>
-                                        {showStock && (
-                                            <span className={`text-xs font-medium ${out ? 'text-red-300' : 'text-gray-300'}`}>Stok {product.stock}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
+            <div
+                className="relative flex-1 min-h-0 rounded-xl overflow-hidden bg-gray-900 cursor-pointer"
+                onClick={() => !out && onOpen(product)}
+            >
+                <ProductImage key={product.id} product={product} className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+
+                <span className="absolute top-4 left-4 badge bg-white/90 text-gray-700">{product.category ?? 'Lainnya'} {product.is_favorite ? '· Favorit' : ''}</span>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!out) onAdd(product);
+                    }}
+                    disabled={out}
+                    title={out ? 'Stok habis' : 'Tambah ke transaksi'}
+                    className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white text-orange-600 border border-gray-200 hover:bg-orange-600 hover:text-white hover:border-orange-600 flex items-center justify-center transition-colors disabled:opacity-50"
+                >
+                    <Plus size={20} />
+                </button>
+
+                <div className="absolute left-4 right-4 bottom-4 text-white">
+                    <div className="text-lg font-bold leading-snug">{product.name}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                        <span className="text-orange-400 font-bold">{formatIDR(product.price)}</span>
+                        {showStock && (
+                            <span className={`text-xs font-medium ${out ? 'text-red-300' : 'text-gray-300'}`}>Stok {product.stock}</span>
+                        )}
+                    </div>
                 </div>
 
                 {items.length > 1 && (
                     <>
                         <button
-                            onClick={() => scrollTo(Math.max(0, active - 1))}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                go(-1);
+                            }}
                             disabled={active === 0}
                             className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center hover:bg-white disabled:opacity-40"
                         >
                             <ChevronLeft size={18} />
                         </button>
                         <button
-                            onClick={() => scrollTo(Math.min(items.length - 1, active + 1))}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                go(1);
+                            }}
                             disabled={active === items.length - 1}
                             className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center hover:bg-white disabled:opacity-40"
                         >
@@ -170,7 +176,10 @@ const HeroView = ({ items, onOpen, onAdd, showStock }) => {
                             {items.map((_, i) => (
                                 <button
                                     key={i}
-                                    onClick={() => scrollTo(i)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActive(i);
+                                    }}
                                     className={`h-1.5 rounded-full transition-all ${i === active ? 'w-5 bg-white' : 'w-1.5 bg-white/60'}`}
                                     aria-label={`Ke produk ${i + 1}`}
                                 />
@@ -180,16 +189,41 @@ const HeroView = ({ items, onOpen, onAdd, showStock }) => {
                 )}
             </div>
 
-            <div className="flex gap-2 overflow-x-auto shrink-0 px-0.5">
-                {items.map((product, i) => (
-                    <button
-                        key={product.id}
-                        onClick={() => scrollTo(i)}
-                        className={`w-16 h-16 rounded-lg overflow-hidden shrink-0 border transition-colors ${i === active ? 'border-orange-500' : 'border-transparent opacity-70'}`}
-                    >
-                        <ProductImage product={product} className="w-full h-full object-cover" />
-                    </button>
-                ))}
+            <div className="flex items-center gap-2 shrink-0">
+                <button
+                    onClick={() => go(-1)}
+                    disabled={active === 0}
+                    title="Produk sebelumnya"
+                    className="w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 disabled:opacity-40 shrink-0"
+                >
+                    <ChevronLeft size={18} />
+                </button>
+
+                <div className="flex gap-2 overflow-hidden justify-center flex-1 py-0.5">
+                    {visibleThumbs.map((thumb, i) => {
+                        const index = start + i;
+                        return (
+                            <button
+                                key={thumb.id}
+                                onClick={() => setActive(index)}
+                                className={`w-16 h-16 rounded-lg overflow-hidden shrink-0 border transition-all ${
+                                    index === active ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-200 opacity-70 hover:opacity-100'
+                                }`}
+                            >
+                                <ProductImage product={thumb} className="w-full h-full object-cover" />
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <button
+                    onClick={() => go(1)}
+                    disabled={active === items.length - 1}
+                    title="Produk berikutnya"
+                    className="w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 disabled:opacity-40 shrink-0"
+                >
+                    <ChevronRight size={18} />
+                </button>
             </div>
         </div>
     );

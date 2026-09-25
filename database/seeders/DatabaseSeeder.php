@@ -28,32 +28,16 @@ class DatabaseSeeder extends Seeder
 
         $password = 'password';
 
-        User::factory()->create([
-            'name' => 'Admin',
-            'email' => 'admin@pos.test',
-            'role' => 'admin',
-            'password' => $password,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Waiter',
-            'email' => 'waiter@pos.test',
-            'role' => 'waiter',
-            'password' => $password,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Koki',
-            'email' => 'koki@pos.test',
-            'role' => 'kitchen',
-            'password' => $password,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Kasir',
-            'email' => 'kasir@pos.test',
-            'role' => 'cashier',
-            'password' => $password,
-        ]);
+        foreach ([
+            ['name' => 'Admin', 'email' => 'admin@pos.test', 'role' => 'admin'],
+            ['name' => 'Waiter', 'email' => 'waiter@pos.test', 'role' => 'waiter'],
+            ['name' => 'Koki', 'email' => 'koki@pos.test', 'role' => 'kitchen'],
+            ['name' => 'Kasir', 'email' => 'kasir@pos.test', 'role' => 'cashier'],
+        ] as $user) {
+            User::query()->updateOrCreate(
+                ['email' => $user['email']],
+                ['name' => $user['name'], 'role' => $user['role'], 'password' => $password]
+            );
+        }
     }
 }

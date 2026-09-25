@@ -81,29 +81,40 @@ class KitchenFlowTest extends TestCase
         $this->assertSame(ItemStatus::Done->value, $item->refresh()->status);
     }
 
-    public function test_kitchen_cannot_skip_or_regress_item_status(): void
+    public function test_kitchen_can_set_item_status_manually(): void
     {
         $order = $this->createOrder();
         $item = $order->items()->firstOrFail();
 
         $this->actingAs($this->kitchen)
             ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Done->value])
-            ->assertStatus(422);
+            ->assertOk()
+            ->assertJsonPath('data.status', ItemStatus::Done->value);
 
         $this->actingAs($this->kitchen)
             ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Cooking->value])
-            ->assertOk();
+            ->assertOk()
+            ->assertJsonPath('data.status', ItemStatus::Cooking->value);
 
         $this->actingAs($this->kitchen)
-            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Done->value])
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Pending->value])
+            ->assertOk()
+            ->assertJsonPath('data.status', ItemStatus::Pending->value);
+
+        $this->assertSame(ItemStatus::Pending->value, $item->refresh()->status);
+    }
+
+    public function test_kitchen_rejects_invalid_item_status(): void
+    {
+        $order = $this->createOrder();
+        $item = $order->items()->firstOrFail();
+
+        $this->actingAs($this->kitchen)
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => 'served'])
             ->assertStatus(422);
 
         $this->actingAs($this->kitchen)
-            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Sent->value])
-            ->assertOk();
-
-        $this->actingAs($this->kitchen)
-            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Cooking->value])
+            ->patchJson("/api/kitchen/items/{$item->id}/status", [])
             ->assertStatus(422);
     }
 
