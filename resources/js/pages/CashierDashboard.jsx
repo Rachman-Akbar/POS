@@ -33,6 +33,7 @@ export default function CashierDashboard() {
     const [paidTouched, setPaidTouched] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [selected, setSelected] = useState({});
+    const [selectedAccount, setSelectedAccount] = useState({});
 
     const { data: products = [] } = useQuery({
         queryKey: ['products'],
@@ -72,7 +73,13 @@ export default function CashierDashboard() {
                 const current = methods.find((m) => m.code === paymentMethod);
                 const target = current ?? methods[0];
                 setPaymentMethod(target.code);
-                setPaymentAccountId(target?.accounts?.[0]?.id ?? null);
+                setPaymentAccountId((prev) => {
+                    const accounts = target?.accounts ?? [];
+                    if (prev != null && accounts.some((a) => a.id === prev)) {
+                        return prev;
+                    }
+                    return accounts[0]?.id ?? null;
+                });
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,7 +105,13 @@ export default function CashierDashboard() {
     const selectPaymentMethod = (code) => {
         const method = payMethods.find((m) => m.code === code);
         setPaymentMethod(code);
-        setPaymentAccountId(method?.accounts?.[0]?.id ?? null);
+        setPaymentAccountId((prev) => {
+            const accounts = method?.accounts ?? [];
+            if (prev != null && accounts.some((a) => a.id === prev)) {
+                return prev;
+            }
+            return accounts[0]?.id ?? null;
+        });
     };
 
     const totals = useMemo(() => {
@@ -190,10 +203,11 @@ export default function CashierDashboard() {
     const settle = async (invoice) => {
         const method = payMethods.find((m) => m.code === (selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash'));
         const target = method ?? payMethods[0] ?? { code: 'cash' };
+        const accountId = selectedAccount[invoice.order.id] ?? target?.accounts?.[0]?.id ?? null;
         try {
             await api.post(`/payments/orders/${invoice.order.id}/settle`, {
                 payment_method: target.code,
-                payment_account_id: target?.accounts?.[0]?.id ?? null,
+                payment_account_id: accountId,
             });
             notifySuccess(`Pembayaran ${invoice.invoice_number} berhasil.`);
             queryClient.invalidateQueries({ queryKey: ['cashier-pending'] });
@@ -258,6 +272,8 @@ export default function CashierDashboard() {
                 paymentMethod={paymentMethod}
                 setPaymentMethod={selectPaymentMethod}
                 payMethods={payMethods}
+                paymentAccountId={paymentAccountId}
+                setPaymentAccountId={setPaymentAccountId}
                 qrisId={settings?.qris_id}
                 totals={totals}
                 paidRaw={paidRaw}
@@ -390,6 +406,8 @@ export default function CashierDashboard() {
                                         const received = (invoice.receipts ?? []).reduce((sum, r) => sum + Number(r.gross_amount), 0);
                                         const remaining = Number(invoice.total_amount) - received;
                                         const method = selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash';
+                                        const methodAccounts = payMethods.find((m) => m.code === method)?.accounts ?? [];
+                                        const accountId = selectedAccount[invoice.order.id] ?? methodAccounts[0]?.id ?? '';
                                         return (
                                             <tr key={invoice.id}>
                                                 <td className="table-cell">
@@ -421,6 +439,21 @@ export default function CashierDashboard() {
                                                                 <option key={m.code} value={m.code}>{m.name}</option>
                                                             ))}
                                                         </select>
+                                                        {methodAccounts.length > 1 && (
+                                                            <select
+                                                                value={accountId}
+                                                                onChange={(e) => setSelectedAccount((s) => ({ ...s, [invoice.order.id]: e.target.value ? Number(e.target.value) : null }))}
+                                                                className="select !w-auto !py-1.5 text-xs"
+                                                                title="Pilih rekening tujuan"
+                                                            >
+                                                                {methodAccounts.map((a) => (
+                                                                    <option key={a.id} value={a.id}>
+                                                                        {a.bank_name ? `${a.bank_name} — ${a.name}` : a.name}
+                                                                        {a.account_number ? ` (${a.account_number})` : ''}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        )}
                                                         <button onClick={() => settle(invoice)} className="btn btn-success !py-1.5 whitespace-nowrap">
                                                             <CheckCircle2 size={14} /> Terima
                                                         </button>
@@ -506,12 +539,13 @@ function CheckoutPanel({
     discountType, setDiscountType, discountRaw, setDiscountRaw,
     enablePpn, taxRate, enablePrepay,
     paymentMethod, setPaymentMethod, payMethods, qrisId,
+    paymentAccountId, setPaymentAccountId,
     totals, paidRaw, onPaidChange, paid, change,
     canSubmit, canDraft, submitting, onSubmit, onDraft, onClear,
 }) {
     const totalAmount = totals.total;
     const activeMethod = payMethods.find((m) => m.code === paymentMethod);
-    const activeAccount = activeMethod?.accounts?.[0];
+    const activeAccount = activeMethod?.accounts?.find((a) => a.id === paymentAccountId) ?? activeMethod?.accounts?.[0];
     let status = null;
     if (cart.length > 0 && totalAmount > 0) {
         if (paid >= totalAmount) {
@@ -596,7 +630,26 @@ function CheckoutPanel({
                             <MethodChip key={m.code} method={m} active={paymentMethod === m.code} onClick={() => setPaymentMethod(m.code)} />
                         ))}
                     </div>
-                    {activeAccount && (
+                    {activeMethod?.accounts?.length > 1 ? (
+                        <div className="mt-2">
+                            <span className="label !mb-0">Rekening</span>
+                            <div className="relative mt-1">
+                                <select
+                                    className="select appearance-none pr-8"
+                                    value={activeAccount?.id ?? ''}
+                                    onChange={(e) => setPaymentAccountId(e.target.value ? Number(e.target.value) : null)}
+                                >
+                                    {activeMethod.accounts.map((a) => (
+                                        <option key={a.id} value={a.id}>
+                                            {a.bank_name ? `${a.bank_name} — ${a.name}` : a.name}
+                                            {a.account_number ? ` (${a.account_number})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                            </div>
+                        </div>
+                    ) : activeAccount && (
                         <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1">
                             {activeMethod?.type === 'bank' ? <Landmark size={11} /> : activeMethod?.type === 'qris' ? <QrCode size={11} /> : <Banknote size={11} />}
                             Masuk ke akun: {activeAccount.bank_name ? `${activeAccount.bank_name} — ${activeAccount.name}` : activeAccount.name}

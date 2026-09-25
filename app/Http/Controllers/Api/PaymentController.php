@@ -12,6 +12,7 @@ use App\Models\PaymentMethod;
 use App\Models\SalesInvoice;
 use App\Models\SalesReceipt;
 use App\Services\SalesService;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -43,8 +44,20 @@ class PaymentController extends Controller
     {
         $data = $request->validate([
             'payment_method' => ['required', 'string', 'max:25'],
-            'payment_account_id' => ['nullable', 'integer', Rule::exists('cash_bank_accounts', 'id')],
+            'payment_account_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('cash_bank_accounts', 'id')->where(
+                    fn (Builder $query) => $query
+                        ->where('is_active', true)
+                        ->whereIn('payment_method_id', PaymentMethod::query()
+                            ->where('code', $request->input('payment_method'))
+                            ->select('id'))
+                ),
+            ],
             'amount' => ['nullable', 'numeric', 'min:0'],
+        ], [
+            'payment_account_id.exists' => 'Rekening tidak sesuai dengan metode pembayaran yang dipilih.',
         ]);
 
         try {

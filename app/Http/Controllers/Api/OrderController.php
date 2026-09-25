@@ -7,10 +7,13 @@ use App\Events\OrderCreated;
 use App\Http\Controllers\Api\Concerns\SafeBroadcasts;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\PaymentMethod;
 use App\Services\SalesService;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
@@ -55,12 +58,24 @@ class OrderController extends Controller
             'discount' => ['nullable', 'numeric', 'min:0'],
             'tax_rate' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['nullable', 'string', 'max:25'],
-            'payment_account_id' => ['nullable', 'integer', 'exists:cash_bank_accounts,id'],
+            'payment_account_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('cash_bank_accounts', 'id')->where(
+                    fn (Builder $query) => $query
+                        ->where('is_active', true)
+                        ->whereIn('payment_method_id', PaymentMethod::query()
+                            ->where('code', $request->input('payment_method', 'cash'))
+                            ->select('id'))
+                ),
+            ],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'exists:products,id'],
             'items.*.qty' => ['required', 'integer', 'min:1'],
             'items.*.notes' => ['nullable', 'string', 'max:500'],
+        ], [
+            'payment_account_id.exists' => 'Rekening tidak sesuai dengan metode pembayaran yang dipilih.',
         ]);
 
         try {
