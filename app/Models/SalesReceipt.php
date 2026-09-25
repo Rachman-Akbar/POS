@@ -13,6 +13,7 @@ class SalesReceipt extends Model
     protected $fillable = [
         'invoice_id',
         'payment_method',
+        'payment_account_id',
         'gross_amount',
         'mdr_fee',
         'net_amount',
@@ -25,6 +26,14 @@ class SalesReceipt extends Model
         'net_amount' => 'decimal:2',
         'payment_date' => 'datetime',
     ];
+
+    /**
+     * @return BelongsTo<CashBankAccount, $this>
+     */
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(CashBankAccount::class, 'payment_account_id');
+    }
 
     /**
      * @return BelongsTo<SalesInvoice, $this>

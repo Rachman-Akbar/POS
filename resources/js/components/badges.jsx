@@ -4,8 +4,9 @@ export const ORDER_STATUS = {
 };
 
 export const ITEM_STATUS = {
-    pending: { label: 'Menunggu', badge: 'badge-pending' },
-    cooking: { label: 'Dimasak', badge: 'badge-cooking' },
+    pending: { label: 'Dipesan', badge: 'badge-pending' },
+    cooking: { label: 'Diproses', badge: 'badge-cooking' },
+    sent: { label: 'Dikirim', badge: 'badge-prepared' },
     done: { label: 'Selesai', badge: 'badge-done' },
 };
 
@@ -39,9 +40,10 @@ export const PAY_METHOD_STYLE = {
     cash: 'bg-emerald-100 text-emerald-800',
     bank: 'bg-blue-100 text-blue-800',
     qris: 'bg-purple-100 text-purple-800',
+    ewallet: 'bg-pink-100 text-pink-800',
 };
 
-export const PAY_METHOD_LABEL = { cash: 'Tunai', bank: 'Transfer', qris: 'QRIS' };
+export const PAY_METHOD_LABEL = { cash: 'Tunai', bank: 'Transfer', qris: 'QRIS', ewallet: 'E-Wallet' };
 
 export function PayMethodBadge({ method }) {
     return <span className={`badge ${PAY_METHOD_STYLE[method] ?? 'badge-pending'}`}>{PAY_METHOD_LABEL[method] ?? method}</span>;

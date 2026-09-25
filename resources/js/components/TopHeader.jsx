@@ -37,8 +37,10 @@ export default function TopHeader({
     showCatalog = false,
     mode,
     onModeChange,
+    viewModes,
     query,
     onQueryChange,
+    searchPlaceholder = 'Cari produk...',
     navItems = [],
     activeNav,
     onNavChange,
@@ -62,8 +64,8 @@ export default function TopHeader({
     return (
         <header className="sticky top-0 z-30 bg-white border-b border-gray-100">
             <div className="mx-auto max-w-[1600px] px-4 md:px-6 flex items-center gap-2 md:gap-3 h-16">
-                {showCatalog && onModeChange && (
-                    <ViewModeSwitch value={mode} onChange={onModeChange} className="hidden sm:inline-flex shrink-0" />
+                {onModeChange && (
+                    <ViewModeSwitch value={mode} onChange={onModeChange} modes={viewModes} className="hidden sm:inline-flex shrink-0" />
                 )}
 
                 {showCatalog && onQueryChange && (
@@ -72,7 +74,7 @@ export default function TopHeader({
                         <input
                             value={query}
                             onChange={(e) => onQueryChange(e.target.value)}
-                            placeholder="Cari produk..."
+                            placeholder={searchPlaceholder}
                             className="input !pl-9"
                         />
                     </div>

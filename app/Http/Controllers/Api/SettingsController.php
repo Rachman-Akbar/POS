@@ -25,6 +25,7 @@ class SettingsController extends Controller
                 'cashier' => Setting::cashierFlags(),
                 'table_numbers' => Setting::tableNumbers(),
                 'payment_methods' => PaymentMethod::where('is_active', true)
+                    ->with(['accounts' => fn ($query) => $query->where('is_active', true)->orderByDesc('is_default')->orderBy('name')])
                     ->orderBy('id')
                     ->get(['id', 'code', 'type', 'name', 'mdr_rate']),
                 'raw' => $settings,

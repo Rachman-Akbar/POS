@@ -15,6 +15,7 @@ use App\Services\SalesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
 class PaymentController extends Controller
 {
@@ -42,13 +43,19 @@ class PaymentController extends Controller
     {
         $data = $request->validate([
             'payment_method' => ['required', 'string', 'max:25'],
+            'payment_account_id' => ['nullable', 'integer', Rule::exists('cash_bank_accounts', 'id')],
             'amount' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         try {
             $method = PaymentMethod::where('code', $data['payment_method'])->where('is_active', true)->first()
                 ?? throw new \DomainException('Metode pembayaran tidak ditemukan.');
-            $receipt = $this->salesService->settlePayment($order, $method, isset($data['amount']) ? (float) $data['amount'] : null);
+            $receipt = $this->salesService->settlePayment(
+                $order,
+                $method,
+                isset($data['amount']) ? (float) $data['amount'] : null,
+                isset($data['payment_account_id']) ? (int) $data['payment_account_id'] : null
+            );
         } catch (\DomainException $e) {
             return response()->json(['message' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -68,7 +75,7 @@ class PaymentController extends Controller
      */
     public function today(): JsonResponse
     {
-        $receipts = SalesReceipt::with('invoice.order')
+        $receipts = SalesReceipt::with(['account', 'invoice.order'])
             ->whereDate('payment_date', now()->toDateString())
             ->orderByDesc('payment_date')
             ->get();

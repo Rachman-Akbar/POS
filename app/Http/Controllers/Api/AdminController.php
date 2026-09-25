@@ -50,11 +50,16 @@ class AdminController extends Controller
     }
 
     /**
-     * Cash & Bank account list for the admin panel.
+     * Cash & Bank account list for the admin panel, with balance.
      */
     public function cashBankAccounts(): JsonResponse
     {
-        return response()->json(['data' => CashBankAccount::orderBy('type')->orderBy('name')->get()]);
+        $accounts = CashBankAccount::with('paymentMethod', 'receipts')
+            ->orderBy('type')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['data' => $accounts]);
     }
 
     /**
@@ -62,9 +67,10 @@ class AdminController extends Controller
      */
     public function storeCashBankAccount(Request $request): JsonResponse
     {
-        $account = CashBankAccount::create($request->validate($this->accountRules()));
+        $account = CashBankAccount::create($this->validatedAccount($request));
+        $this->syncDefault($account);
 
-        return response()->json(['data' => $account], Response::HTTP_CREATED);
+        return response()->json(['data' => $this->presentAccount($account)], Response::HTTP_CREATED);
     }
 
     /**
@@ -72,9 +78,10 @@ class AdminController extends Controller
      */
     public function updateCashBankAccount(Request $request, CashBankAccount $cashBankAccount): JsonResponse
     {
-        $cashBankAccount->update($request->validate($this->accountRules()));
+        $cashBankAccount->update($this->validatedAccount($request));
+        $this->syncDefault($cashBankAccount);
 
-        return response()->json(['data' => $cashBankAccount->fresh()]);
+        return response()->json(['data' => $this->presentAccount($cashBankAccount)]);
     }
 
     /**
@@ -88,11 +95,24 @@ class AdminController extends Controller
     }
 
     /**
-     * Payment method list for the admin panel.
+     * Mutation history (incoming payments) for a Cash & Bank account.
+     */
+    public function accountMutations(CashBankAccount $cashBankAccount): JsonResponse
+    {
+        $receipts = $cashBankAccount->receipts()
+            ->with(['invoice.order'])
+            ->orderByDesc('payment_date')
+            ->get();
+
+        return response()->json(['data' => $receipts]);
+    }
+
+    /**
+     * Payment method list for the admin panel, with linked accounts.
      */
     public function paymentMethods(): JsonResponse
     {
-        return response()->json(['data' => PaymentMethod::orderBy('id')->get()]);
+        return response()->json(['data' => PaymentMethod::with('accounts')->orderBy('id')->get()]);
     }
 
     /**
@@ -132,16 +152,11 @@ class AdminController extends Controller
     {
         return [
             'code' => ['required', 'string', 'max:25', Rule::unique('payment_methods', 'code')->ignore($ignoreId)],
-            'type' => ['required', Rule::in(['kas', 'bank', 'qris'])],
+            'type' => ['required', Rule::in(['kas', 'bank', 'qris', 'ewallet'])],
             'name' => ['required', 'string', 'max:120'],
             'mdr_rate' => ['required', 'numeric', 'min:0', 'max:1'],
             'is_active' => ['sometimes', 'boolean'],
         ];
-    }
-
-    private function isCashierFlag(string $key): bool
-    {
-        return in_array($key, array_keys(Setting::cashierFlags()), true);
     }
 
     /**
@@ -152,9 +167,52 @@ class AdminController extends Controller
         return [
             'name' => ['required', 'string', 'max:120'],
             'type' => ['required', Rule::in(['kas', 'bank'])],
+            'payment_method_id' => ['nullable', 'integer', Rule::exists('payment_methods', 'id')],
+            'is_default' => ['sometimes', 'boolean'],
             'account_number' => ['nullable', 'string', 'max:50'],
             'bank_name' => ['nullable', 'string', 'max:120'],
             'is_active' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedAccount(Request $request): array
+    {
+        $data = $request->validate($this->accountRules());
+
+        $data['payment_method_id'] = $data['payment_method_id'] ?? null;
+        $data['is_default'] = (bool) ($data['is_default'] ?? false);
+
+        return $data;
+    }
+
+    /**
+     * Ensure only one default account per payment method.
+     */
+    private function syncDefault(CashBankAccount $account): void
+    {
+        if (! $account->is_default || ! $account->payment_method_id) {
+            return;
+        }
+
+        CashBankAccount::query()
+            ->where('payment_method_id', $account->payment_method_id)
+            ->where('id', '!=', $account->id)
+            ->update(['is_default' => false]);
+    }
+
+    /**
+     * Reload the account with its balance and method for the response.
+     */
+    private function presentAccount(CashBankAccount $account): CashBankAccount
+    {
+        return $account->fresh(['paymentMethod', 'receipts']);
+    }
+
+    private function isCashierFlag(string $key): bool
+    {
+        return in_array($key, array_keys(Setting::cashierFlags()), true);
     }
 }

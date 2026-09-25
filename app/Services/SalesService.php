@@ -6,6 +6,7 @@ use App\Enums\InvoiceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\PaymentType;
+use App\Models\CashBankAccount;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentMethod;
@@ -25,7 +26,7 @@ class SalesService
      * Create an order with its items, invoice, stock deduction and journal posting.
      *
      * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
-     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, paid_amount?: float|null, notes?: string|null}  $options
+     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, payment_account_id?: int|null, paid_amount?: float|null, notes?: string|null}  $options
      */
     public function createOrder(?User $user, string $tableNumber, PaymentType $paymentType, array $items, array $options = []): Order
     {
@@ -93,7 +94,8 @@ class SalesService
                 if ($applied > 0) {
                     $method = PaymentMethod::where('code', $options['payment_method'] ?? 'cash')->where('is_active', true)->first()
                         ?? PaymentMethod::where('code', 'cash')->firstOrFail();
-                    $this->processPayment($invoice, $method, $applied);
+                    $account = $this->resolvePaymentAccount($method, $options['payment_account_id'] ?? null);
+                    $this->processPayment($invoice, $method, $applied, $account);
                 }
 
                 $order->update([
@@ -113,7 +115,7 @@ class SalesService
     /**
      * Settle a payment (full or partial) for an outstanding order at checkout.
      */
-    public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null): SalesReceipt
+    public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null, ?int $paymentAccountId = null): SalesReceipt
     {
         if ($order->payment_status === PaymentStatus::Paid->value) {
             throw new \DomainException('Order ini sudah lunas.');
@@ -123,7 +125,7 @@ class SalesService
             throw new \DomainException('Faktur belum tersedia.');
         }
 
-        return DB::transaction(function () use ($order, $method, $amount) {
+        return DB::transaction(function () use ($order, $method, $amount, $paymentAccountId) {
             $invoice = $order->invoice;
             $total = (float) $invoice->total_amount;
             $received = round((float) $invoice->receipts()->sum('gross_amount'), 2);
@@ -141,7 +143,8 @@ class SalesService
                 throw new \DomainException('Nominal pembayaran tidak valid.');
             }
 
-            $receipt = $this->processPayment($invoice, $method, $payAmount);
+            $account = $this->resolvePaymentAccount($method, $paymentAccountId);
+            $receipt = $this->processPayment($invoice, $method, $payAmount, $account);
 
             $newReceived = round($received + $payAmount, 2);
             $order->update([
@@ -188,7 +191,7 @@ class SalesService
     /**
      * Process a payment, recording the receipt and posting the journal.
      */
-    private function processPayment(SalesInvoice $invoice, PaymentMethod $method, float $grossAmount): SalesReceipt
+    private function processPayment(SalesInvoice $invoice, PaymentMethod $method, float $grossAmount, ?CashBankAccount $account = null): SalesReceipt
     {
         $mdrFee = round($grossAmount * $method->mdr_rate, 2);
         $netAmount = round($grossAmount - $mdrFee, 2);
@@ -196,6 +199,7 @@ class SalesService
         $receipt = SalesReceipt::create([
             'invoice_id' => $invoice->id,
             'payment_method' => $method->code,
+            'payment_account_id' => $account?->id,
             'gross_amount' => $grossAmount,
             'mdr_fee' => $mdrFee,
             'net_amount' => $netAmount,
@@ -213,6 +217,31 @@ class SalesService
         $this->accountingService->postSalesReceipt($receipt);
 
         return $receipt;
+    }
+
+    /**
+     * Resolve the Cash & Bank account a payment should be credited to.
+     *
+     * An explicit account must belong to the chosen payment method; otherwise,
+     * the method's default account is used, falling back to its first active
+     * account. Cash silently routes to the cash method's account (Kas Utama).
+     */
+    private function resolvePaymentAccount(PaymentMethod $method, ?int $paymentAccountId = null): ?CashBankAccount
+    {
+        if ($paymentAccountId) {
+            $account = CashBankAccount::query()->where('id', $paymentAccountId)->where('is_active', true)->first();
+
+            if ($account && $account->payment_method_id === $method->id) {
+                return $account;
+            }
+        }
+
+        return CashBankAccount::query()
+            ->where('payment_method_id', $method->id)
+            ->where('is_active', true)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->first();
     }
 
     /**

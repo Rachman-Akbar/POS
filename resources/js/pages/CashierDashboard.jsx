@@ -28,6 +28,7 @@ export default function CashierDashboard() {
     const [discountRaw, setDiscountRaw] = useState('');
     const [taxRate, setTaxRate] = useState(11);
     const [paymentMethod, setPaymentMethod] = useState('cash');
+    const [paymentAccountId, setPaymentAccountId] = useState(null);
     const [paidRaw, setPaidRaw] = useState('');
     const [paidTouched, setPaidTouched] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -67,8 +68,11 @@ export default function CashierDashboard() {
         if (settings) {
             setTaxRate(Number(settings.ppn_rate ?? 11));
             const methods = settings.payment_methods ?? [];
-            if (methods.length && !methods.some((m) => m.code === paymentMethod)) {
-                setPaymentMethod(methods[0].code);
+            if (methods.length) {
+                const current = methods.find((m) => m.code === paymentMethod);
+                const target = current ?? methods[0];
+                setPaymentMethod(target.code);
+                setPaymentAccountId(target?.accounts?.[0]?.id ?? null);
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,6 +94,12 @@ export default function CashierDashboard() {
 
     const methods = settings?.payment_methods ?? [];
     const payMethods = methods.length > 0 ? methods : [{ code: 'cash', name: 'Tunai', mdr_rate: 0 }];
+
+    const selectPaymentMethod = (code) => {
+        const method = payMethods.find((m) => m.code === code);
+        setPaymentMethod(code);
+        setPaymentAccountId(method?.accounts?.[0]?.id ?? null);
+    };
 
     const totals = useMemo(() => {
         const subtotal = cart.reduce((sum, l) => sum + l.price * l.qty, 0);
@@ -157,6 +167,7 @@ export default function CashierDashboard() {
                 discount: totals.discount,
                 tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
                 payment_method: paymentType === 'pay_now' ? paymentMethod : undefined,
+                payment_account_id: paymentType === 'pay_now' ? paymentAccountId : undefined,
                 paid_amount: paymentType === 'pay_now' ? paid : undefined,
                 items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
             });
@@ -177,9 +188,13 @@ export default function CashierDashboard() {
     };
 
     const settle = async (invoice) => {
-        const method = selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash';
+        const method = payMethods.find((m) => m.code === (selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash'));
+        const target = method ?? payMethods[0] ?? { code: 'cash' };
         try {
-            await api.post(`/payments/orders/${invoice.order.id}/settle`, { payment_method: method });
+            await api.post(`/payments/orders/${invoice.order.id}/settle`, {
+                payment_method: target.code,
+                payment_account_id: target?.accounts?.[0]?.id ?? null,
+            });
             notifySuccess(`Pembayaran ${invoice.invoice_number} berhasil.`);
             queryClient.invalidateQueries({ queryKey: ['cashier-pending'] });
             queryClient.invalidateQueries({ queryKey: ['cashier-today'] });
@@ -241,7 +256,7 @@ export default function CashierDashboard() {
                 enablePpn={enablePpn}
                 enablePrepay={enablePrepay}
                 paymentMethod={paymentMethod}
-                setPaymentMethod={setPaymentMethod}
+                setPaymentMethod={selectPaymentMethod}
                 payMethods={payMethods}
                 qrisId={settings?.qris_id}
                 totals={totals}
@@ -255,6 +270,7 @@ export default function CashierDashboard() {
                 canSubmit={canSubmit}
                 canDraft={canDraft}
                 submitting={submitting}
+                onClear={resetCheckout}
                 onSubmit={() => submitOrder('pay_now')}
                 onDraft={() => submitOrder('pay_later')}
             />
@@ -470,8 +486,8 @@ export default function CashierDashboard() {
 }
 
 function MethodChip({ method, active, onClick }) {
-    const Icons = { cash: Banknote, bank: Landmark, qris: QrCode };
-    const Icon = Icons[method.code] ?? CreditCard;
+    const Icons = { kas: Banknote, bank: Landmark, qris: QrCode };
+    const Icon = Icons[method.type] ?? Icons[method.code] ?? CreditCard;
     return (
         <button
             onClick={onClick}
@@ -491,9 +507,11 @@ function CheckoutPanel({
     enablePpn, taxRate, enablePrepay,
     paymentMethod, setPaymentMethod, payMethods, qrisId,
     totals, paidRaw, onPaidChange, paid, change,
-    canSubmit, canDraft, submitting, onSubmit, onDraft,
+    canSubmit, canDraft, submitting, onSubmit, onDraft, onClear,
 }) {
     const totalAmount = totals.total;
+    const activeMethod = payMethods.find((m) => m.code === paymentMethod);
+    const activeAccount = activeMethod?.accounts?.[0];
     let status = null;
     if (cart.length > 0 && totalAmount > 0) {
         if (paid >= totalAmount) {
@@ -508,8 +526,17 @@ function CheckoutPanel({
     }
 
     return (
-        <div className="card sticky top-20">
-            <div className="space-y-5">
+        <div className="card sticky top-20 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-100 shrink-0">
+                <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
+                    <ShoppingCart size={16} /> Transaksi
+                </h3>
+                <button onClick={onClear} className="btn btn-danger !py-1.5 !px-3 text-xs shrink-0" title="Bersihkan transaksi">
+                    <Trash2 size={14} /> Bersihkan
+                </button>
+            </div>
+
+            <div className="space-y-5 overflow-y-auto scrollbar-thin flex-1 min-h-0">
                 {enableTable && (
                     <div className="flex items-center gap-3">
                         <span className="label w-28 shrink-0 !mb-0">Meja</span>
@@ -569,6 +596,12 @@ function CheckoutPanel({
                             <MethodChip key={m.code} method={m} active={paymentMethod === m.code} onClick={() => setPaymentMethod(m.code)} />
                         ))}
                     </div>
+                    {activeAccount && (
+                        <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1">
+                            {activeMethod?.type === 'bank' ? <Landmark size={11} /> : activeMethod?.type === 'qris' ? <QrCode size={11} /> : <Banknote size={11} />}
+                            Masuk ke akun: {activeAccount.bank_name ? `${activeAccount.bank_name} — ${activeAccount.name}` : activeAccount.name}
+                        </p>
+                    )}
                 </div>
 
                 {paymentMethod === 'qris' && qrisId && (
@@ -603,13 +636,15 @@ function CheckoutPanel({
                         )}
                     </p>
                 )}
+            </div>
 
-                <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+            <div className="shrink-0 border-t border-gray-100 mt-5 pt-3 space-y-4">
+                <div className="flex items-center justify-between">
                     <span className="font-bold text-sm">Total</span>
                     <span className="font-bold text-lg text-orange-600">{formatIDR(totals.total)}</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-2 gap-2">
                     <button className="btn btn-ghost justify-center" disabled={!canDraft} onClick={onDraft}>
                         <Save size={16} /> Draft
                     </button>

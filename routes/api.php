@@ -45,6 +45,7 @@ Route::get('/admin/settings', [AdminController::class, 'index']);
 Route::put('/admin/settings', [AdminController::class, 'update']);
 Route::get('/cash-bank-accounts', [AdminController::class, 'cashBankAccounts']);
 Route::post('/cash-bank-accounts', [AdminController::class, 'storeCashBankAccount']);
+Route::get('/cash-bank-accounts/{cashBankAccount}/mutations', [AdminController::class, 'accountMutations']);
 Route::put('/cash-bank-accounts/{cashBankAccount}', [AdminController::class, 'updateCashBankAccount']);
 Route::delete('/cash-bank-accounts/{cashBankAccount}', [AdminController::class, 'destroyCashBankAccount']);
 

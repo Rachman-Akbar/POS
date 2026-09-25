@@ -2,10 +2,18 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Wallet, Pencil, Trash2, Plus, X, Landmark, Banknote, Settings2, Star, Package, Hash, Percent, CreditCard, QrCode,
+    Smartphone, History,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { api, formatIDR } from '../api/client';
 import { notifySuccess, notifyError, confirmAction } from '../utils/alerts';
+
+const METHOD_TYPE_META = {
+    kas: { label: 'Kas', color: 'bg-emerald-600', soft: 'bg-emerald-50 text-emerald-700', icon: Banknote },
+    bank: { label: 'Bank', color: 'bg-blue-600', soft: 'bg-blue-50 text-blue-700', icon: Landmark },
+    qris: { label: 'QRIS', color: 'bg-purple-600', soft: 'bg-purple-50 text-purple-700', icon: QrCode },
+    ewallet: { label: 'E-Wallet', color: 'bg-pink-600', soft: 'bg-pink-50 text-pink-700', icon: Smartphone },
+};
 
 const FLAG_META = [
     { key: 'cashier_show_favorites', label: 'Produk Favorit', icon: Star, desc: 'Tampilkan atau sembunyikan bagian produk favorit di katalog kasir.' },
@@ -15,7 +23,7 @@ const FLAG_META = [
     { key: 'cashier_enable_prepay', label: 'Sistem Bayar Di Muka', icon: Wallet, desc: 'Izinkan status pembayaran di muka (seluruh uang diterima sebelum transaksi disimpan).' },
 ];
 
-const EMPTY_FORM = { name: '', type: 'kas', account_number: '', bank_name: '', is_active: true };
+const EMPTY_FORM = { name: '', type: 'kas', payment_method_id: '', is_default: false, account_number: '', bank_name: '', is_active: true };
 const EMPTY_METHOD = { code: '', type: 'kas', name: '', is_active: true };
 
 export default function AdminDashboard() {
@@ -25,6 +33,7 @@ export default function AdminDashboard() {
     const [form, setForm] = useState(EMPTY_FORM);
     const [methodModal, setMethodModal] = useState(null);
     const [methodForm, setMethodForm] = useState(EMPTY_METHOD);
+    const [mutations, setMutations] = useState(null);
 
     const { data: flags = {} } = useQuery({
         queryKey: ['admin-flags'],
@@ -73,6 +82,8 @@ export default function AdminDashboard() {
             const payload = {
                 name: form.name,
                 type: form.type,
+                payment_method_id: form.payment_method_id ? Number(form.payment_method_id) : null,
+                is_default: form.is_default,
                 account_number: form.account_number,
                 bank_name: form.type === 'bank' ? form.bank_name : null,
                 is_active: form.is_active,
@@ -164,10 +175,28 @@ export default function AdminDashboard() {
     const openModal = (account = null) => {
         setForm(
             account
-                ? { id: account.id, name: account.name, type: account.type, account_number: account.account_number ?? '', bank_name: account.bank_name ?? '', is_active: account.is_active }
+                ? {
+                      id: account.id,
+                      name: account.name,
+                      type: account.type,
+                      payment_method_id: account.payment_method_id ? String(account.payment_method_id) : '',
+                      is_default: account.is_default,
+                      account_number: account.account_number ?? '',
+                      bank_name: account.bank_name ?? '',
+                      is_active: account.is_active,
+                  }
                 : EMPTY_FORM,
         );
         setModal(account ? 'edit' : 'add');
+    };
+
+    const openMutations = async (account) => {
+        try {
+            const { data } = await api.get(`/cash-bank-accounts/${account.id}/mutations`);
+            setMutations({ account, receipts: data.data });
+        } catch {
+            notifyError('Gagal', 'Riwayat mutasi tidak dapat dimuat.');
+        }
     };
 
     const header = {
@@ -185,7 +214,7 @@ export default function AdminDashboard() {
     return (
         <Layout header={header}>
             {tab === 'settings' && (
-                <div className="max-w-2xl space-y-4">
+                <div className="space-y-4">
                     <div className="card">
                         <h3 className="font-bold mb-1 flex items-center gap-2"><Settings2 size={17} /> Pengaturan Tampilan Kasir</h3>
                         <p className="text-sm text-muted mb-5">Atur elemen yang tampil dan aktif pada antarmuka kasir. Perubahan langsung berlaku.</p>
@@ -211,7 +240,7 @@ export default function AdminDashboard() {
             )}
 
             {tab === 'favorites' && (
-                <div className="max-w-3xl space-y-4">
+                <div className="space-y-4">
                     <div className="card">
                         <div className="mb-4">
                             <h3 className="font-bold">Produk Favorit</h3>
@@ -268,7 +297,7 @@ export default function AdminDashboard() {
             )}
 
             {tab === 'methods' && (
-                <div className="max-w-3xl space-y-4">
+                <div className="space-y-4">
                     <div className="card">
                         <div className="flex items-center justify-between mb-4">
                             <div>
@@ -289,40 +318,55 @@ export default function AdminDashboard() {
                                         <tr>
                                             <th className="table-head">Metode</th>
                                             <th className="table-head">Jenis</th>
+                                            <th className="table-head">Akun</th>
                                             <th className="table-head text-center">Aktif</th>
                                             <th className="table-head text-right">Aksi</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
-                                        {methods.map((method) => (
-                                            <tr key={method.id}>
-                                                <td className="table-cell">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${method.type === 'bank' ? 'bg-blue-50 text-blue-700' : method.type === 'qris' ? 'bg-purple-50 text-purple-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                                                            {method.type === 'bank' ? <Landmark size={15} /> : method.type === 'qris' ? <QrCode size={15} /> : <Banknote size={15} />}
-                                                        </span>
-                                                        <div className="min-w-0">
-                                                            <div className="font-semibold text-sm truncate">{method.name}</div>
-                                                            <div className="text-[11px] text-muted">{method.code}</div>
+                                        {methods.map((method) => {
+                                            const meta = METHOD_TYPE_META[method.type] ?? METHOD_TYPE_META.kas;
+                                            const linked = method.accounts ?? [];
+                                            const defaultAccount = linked.find((a) => a.is_default) ?? linked[0];
+                                            return (
+                                                <tr key={method.id}>
+                                                    <td className="table-cell">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${meta.soft}`}>
+                                                                <meta.icon size={15} />
+                                                            </span>
+                                                            <div className="min-w-0">
+                                                                <div className="font-semibold text-sm truncate">{method.name}</div>
+                                                                <div className="text-[11px] text-muted">{method.code}</div>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                </td>
-                                                <td className="table-cell text-sm capitalize">{method.type}</td>
-                                                <td className="table-cell text-center">
-                                                    {method.is_active ? <span className="badge badge-done">Aktif</span> : <span className="badge badge-pending">Nonaktif</span>}
-                                                </td>
-                                                <td className="table-cell">
-                                                    <div className="flex justify-end gap-1">
-                                                        <button className="btn btn-ghost !px-2 !py-1.5" onClick={() => openMethodModal(method)} title="Edit">
-                                                            <Pencil size={14} />
-                                                        </button>
-                                                        <button className="btn btn-ghost !px-2 !py-1.5 text-red-500" onClick={() => removeMethod(method)} title="Hapus">
-                                                            <Trash2 size={14} />
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                                    </td>
+                                                    <td className="table-cell text-sm capitalize">{meta.label}</td>
+                                                    <td className="table-cell text-sm text-muted">
+                                                        {linked.length === 0 ? (
+                                                            '-'
+                                                        ) : defaultAccount ? (
+                                                            <span>{defaultAccount.name}</span>
+                                                        ) : (
+                                                            <span>{linked.length} akun</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="table-cell text-center">
+                                                        {method.is_active ? <span className="badge badge-done">Aktif</span> : <span className="badge badge-pending">Nonaktif</span>}
+                                                    </td>
+                                                    <td className="table-cell">
+                                                        <div className="flex justify-end gap-1">
+                                                            <button className="btn btn-ghost !px-2 !py-1.5" onClick={() => openMethodModal(method)} title="Edit">
+                                                                <Pencil size={14} />
+                                                            </button>
+                                                            <button className="btn btn-ghost !px-2 !py-1.5 text-red-500" onClick={() => removeMethod(method)} title="Hapus">
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -332,7 +376,7 @@ export default function AdminDashboard() {
             )}
 
             {tab === 'accounts' && (
-                <div className="max-w-3xl space-y-4">
+                <div className="space-y-4">
                     <div className="card">
                         <div className="flex items-center justify-between mb-4">
                             <div>
@@ -353,7 +397,9 @@ export default function AdminDashboard() {
                                         <tr>
                                             <th className="table-head">Akun</th>
                                             <th className="table-head">Tipe</th>
+                                            <th className="table-head">Metode</th>
                                             <th className="table-head">No. Rekening</th>
+                                            <th className="table-head text-right">Saldo</th>
                                             <th className="table-head text-center">Aktif</th>
                                             <th className="table-head text-right">Aksi</th>
                                         </tr>
@@ -367,18 +413,26 @@ export default function AdminDashboard() {
                                                             {account.type === 'bank' ? <Landmark size={15} /> : <Banknote size={15} />}
                                                         </span>
                                                         <div className="min-w-0">
-                                                            <div className="font-semibold text-sm truncate">{account.name}</div>
+                                                            <div className="font-semibold text-sm truncate flex items-center gap-1.5">
+                                                                {account.name}
+                                                                {account.is_default && <span className="text-[10px] font-bold text-orange-600">DEFAULT</span>}
+                                                            </div>
                                                             {account.bank_name && <div className="text-[11px] text-muted">{account.bank_name}</div>}
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td className="table-cell text-sm capitalize">{account.type}</td>
+                                                <td className="table-cell text-sm text-muted">{account.payment_method?.name ?? 'Tanpa metode'}</td>
                                                 <td className="table-cell text-sm text-muted">{account.account_number ?? '-'}</td>
+                                                <td className="table-cell text-right font-semibold text-emerald-700 whitespace-nowrap">{formatIDR(account.balance ?? 0)}</td>
                                                 <td className="table-cell text-center">
                                                     {account.is_active ? <span className="badge badge-done">Aktif</span> : <span className="badge badge-pending">Nonaktif</span>}
                                                 </td>
                                                 <td className="table-cell">
                                                     <div className="flex justify-end gap-1">
+                                                        <button className="btn btn-ghost !px-2 !py-1.5" onClick={() => openMutations(account)} title="Lihat mutasi">
+                                                            <History size={14} />
+                                                        </button>
                                                         <button className="btn btn-ghost !px-2 !py-1.5" onClick={() => openModal(account)} title="Edit">
                                                             <Pencil size={14} />
                                                         </button>
@@ -430,6 +484,30 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
                             <div>
+                                <label className="label">Metode Pembayaran</label>
+                                <select
+                                    className="select"
+                                    value={form.payment_method_id}
+                                    onChange={(e) => setForm({ ...form, payment_method_id: e.target.value })}
+                                >
+                                    <option value="">Tanpa metode (tidak tampil di kasir)</option>
+                                    {methods.map((m) => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[11px] text-muted mt-1">Akun akan muncul sebagai sub-opsi metode ini di kasir.</p>
+                            </div>
+                            <label className={`flex items-center gap-2 text-sm cursor-pointer ${form.payment_method_id ? '' : 'opacity-40 pointer-events-none'}`}>
+                                <input
+                                    type="checkbox"
+                                    checked={form.is_default}
+                                    onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+                                    disabled={!form.payment_method_id}
+                                    className="w-4 h-4 accent-orange-600"
+                                />
+                                Akun Utama (otomatis dipilih kasir)
+                            </label>
+                            <div>
                                 <label className="label">No. Rekening</label>
                                 <input className="input" value={form.account_number} onChange={(e) => setForm({ ...form, account_number: e.target.value })} placeholder="Nomor rekening (opsional)" />
                             </div>
@@ -469,18 +547,17 @@ export default function AdminDashboard() {
                             <div>
                                 <label className="label">Jenis</label>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <button
-                                        onClick={() => setMethodForm({ ...methodForm, type: 'kas' })}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${methodForm.type === 'kas' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-muted hover:bg-gray-200'}`}
-                                    >
-                                        Kas
-                                    </button>
-                                    <button
-                                        onClick={() => setMethodForm({ ...methodForm, type: 'bank' })}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${methodForm.type === 'bank' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-muted hover:bg-gray-200'}`}
-                                    >
-                                        Bank
-                                    </button>
+                                    {Object.entries(METHOD_TYPE_META).map(([type, meta]) => (
+                                        <button
+                                            key={type}
+                                            onClick={() => setMethodForm({ ...methodForm, type })}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                                                methodForm.type === type ? `${meta.color} text-white` : 'bg-gray-100 text-muted hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            <meta.icon size={14} /> {meta.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                             <div>
@@ -502,6 +579,60 @@ export default function AdminDashboard() {
                             <button className="btn btn-primary" disabled={!methodForm.name.trim() || !methodForm.code.trim() || saveMethod.isPending} onClick={() => saveMethod.mutate()}>
                                 {saveMethod.isPending ? 'Menyimpan...' : 'Simpan'}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        {mutations && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setMutations(null)}>
+                    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100">
+                            <div>
+                                <h3 className="font-bold flex items-center gap-2"><History size={17} /> Mutasi {mutations.account.name}</h3>
+                                <p className="text-xs text-muted mt-0.5">Incoming payment sebagai <span className="text-emerald-700 font-semibold">saldo {formatIDR(mutations.account.balance ?? 0)}</span></p>
+                            </div>
+                            <button className="btn-icon w-8 h-8 text-muted hover:bg-gray-100" onClick={() => setMutations(null)}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="overflow-y-auto px-5 py-4">
+                            {mutations.receipts.length === 0 ? (
+                                <p className="text-muted text-sm text-center py-8">Belum ada mutasi masuk untuk akun ini.</p>
+                            ) : (
+                                <table className="w-full">
+                                    <thead>
+                                        <tr>
+                                            <th className="table-head !px-2">Faktur</th>
+                                            <th className="table-head !px-2">Tanggal</th>
+                                            <th className="table-head !px-2">Metode</th>
+                                            <th className="table-head !px-2 text-right">Nominal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                        {mutations.receipts.map((receipt) => (
+                                            <tr key={receipt.id}>
+                                                <td className="table-cell !px-2">
+                                                    <div className="font-semibold text-xs">{receipt.invoice?.invoice_number ?? '-'}</div>
+                                                    <div className="text-[11px] text-muted">{receipt.invoice?.order?.order_number}</div>
+                                                </td>
+                                                <td className="table-cell !px-2 text-xs text-muted">
+                                                    {new Date(receipt.payment_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                </td>
+                                                <td className="table-cell !px-2 text-xs">{receipt.payment_method}</td>
+                                                <td className="table-cell !px-2 text-right font-semibold text-emerald-700">{formatIDR(receipt.net_amount)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+                            <span className="text-sm font-bold">Total Masuk</span>
+                            <span className="text-sm font-bold text-emerald-700">
+                                {formatIDR(mutations.receipts.reduce((sum, r) => sum + Number(r.net_amount), 0))}
+                            </span>
                         </div>
                     </div>
                 </div>

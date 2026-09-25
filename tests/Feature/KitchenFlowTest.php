@@ -53,6 +53,7 @@ class KitchenFlowTest extends TestCase
         $response->assertOk()
             ->assertJsonCount(1, 'data.waiting')
             ->assertJsonCount(0, 'data.cooking')
+            ->assertJsonCount(0, 'data.sent')
             ->assertJsonCount(0, 'data.done')
             ->assertJsonPath('data.waiting.0.order.id', $order->id);
     }
@@ -66,6 +67,11 @@ class KitchenFlowTest extends TestCase
             ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Cooking->value])
             ->assertOk()
             ->assertJsonPath('data.status', ItemStatus::Cooking->value);
+
+        $this->actingAs($this->kitchen)
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Sent->value])
+            ->assertOk()
+            ->assertJsonPath('data.status', ItemStatus::Sent->value);
 
         $this->actingAs($this->kitchen)
             ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Done->value])
@@ -89,7 +95,15 @@ class KitchenFlowTest extends TestCase
             ->assertOk();
 
         $this->actingAs($this->kitchen)
-            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Pending->value])
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Done->value])
+            ->assertStatus(422);
+
+        $this->actingAs($this->kitchen)
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Sent->value])
+            ->assertOk();
+
+        $this->actingAs($this->kitchen)
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Cooking->value])
             ->assertStatus(422);
     }
 
@@ -99,8 +113,11 @@ class KitchenFlowTest extends TestCase
         $item = $order->items()->firstOrFail();
         $waiter = User::where('role', 'waiter')->firstOrFail();
 
-        $this->actingAs($this->kitchen)
-            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Done->value]);
+        foreach ([ItemStatus::Cooking, ItemStatus::Sent, ItemStatus::Done] as $status) {
+            $this->actingAs($this->kitchen)
+                ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => $status->value])
+                ->assertOk();
+        }
 
         $this->actingAs($waiter)->postJson("/api/orders/{$order->id}/complete");
 
@@ -108,6 +125,7 @@ class KitchenFlowTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data.waiting')
             ->assertJsonCount(0, 'data.cooking')
+            ->assertJsonCount(0, 'data.sent')
             ->assertJsonCount(0, 'data.done');
     }
 }

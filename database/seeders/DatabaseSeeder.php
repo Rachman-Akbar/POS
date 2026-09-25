@@ -22,6 +22,10 @@ class DatabaseSeeder extends Seeder
             ProductSeeder::class,
         ]);
 
+        if (! app()->isProduction()) {
+            $this->call(TestingSeeder::class);
+        }
+
         $password = 'password';
 
         User::factory()->create([

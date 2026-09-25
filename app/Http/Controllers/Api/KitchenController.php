@@ -32,6 +32,7 @@ class KitchenController extends Controller
             'data' => [
                 'waiting' => $grouped->get(ItemStatus::Pending->value, collect())->values(),
                 'cooking' => $grouped->get(ItemStatus::Cooking->value, collect())->values(),
+                'sent' => $grouped->get(ItemStatus::Sent->value, collect())->values(),
                 'done' => $grouped->get(ItemStatus::Done->value, collect())->values(),
             ],
         ]);
@@ -43,7 +44,7 @@ class KitchenController extends Controller
     public function updateItemStatus(Request $request, OrderItem $item): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:cooking,done'],
+            'status' => ['required', 'in:cooking,sent,done'],
         ]);
 
         $current = ItemStatus::from($item->status);

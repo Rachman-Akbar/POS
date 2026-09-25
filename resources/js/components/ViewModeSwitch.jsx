@@ -6,10 +6,10 @@ export const VIEW_MODES = [
     { key: 'hero', label: 'Gallery', icon: GalleryHorizontal },
 ];
 
-export default function ViewModeSwitch({ value = 'grid', onChange, className = '' }) {
-    const index = Math.max(0, VIEW_MODES.findIndex((mode) => mode.key === value));
-    const current = VIEW_MODES[index] ?? VIEW_MODES[0];
-    const next = VIEW_MODES[(index + 1) % VIEW_MODES.length];
+export default function ViewModeSwitch({ value = 'grid', onChange, modes = VIEW_MODES, className = '' }) {
+    const index = Math.max(0, modes.findIndex((mode) => mode.key === value));
+    const current = modes[index] ?? modes[0];
+    const next = modes[(index + 1) % modes.length];
     const Icon = current.icon;
 
     return (
