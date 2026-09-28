@@ -1,0 +1,26 @@
+Revisi
+
+Header
+    ada icon untuk menuju riwayat order
+    ukuran serch bar dan dropdown kategori sama jadi berbegi tempat. kategori tidak lagi muncul kebawah namun di samping nya seperti message dialog dengan ukuran yang flexible sesuai isi text category. Tidak perlu total product. JIka kategori dipilih maka Kategori : [Nama kategori]
+
+Product detail page
+    Tidak perlu rate and review
+    Tidak perlu variant
+
+Search page
+    Tidak perlu sidebar
+
+Home page
+    Ganti judul Produk dan layanan unggulan menjadi Catalog
+
+Checkout page
+    Tidak perlu judul, langsung form
+
+Cart page
+    Tidak perlu judul dan tab switch
+
+
+perbaiki revisi diatas sekaligus perbaiki karena perubahan product dari variant menjadi product tunggal pada logika backend, seller, admin panel, dan juga database nya. berikan perbaikan file ziip lengkap
+
+

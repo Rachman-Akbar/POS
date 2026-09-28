@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CashBankAccount;
 use App\Models\PaymentMethod;
+use App\Models\Product;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,11 +15,14 @@ use Illuminate\Validation\Rule;
 class AdminController extends Controller
 {
     /**
-     * Current value of every cashier flag.
+     * Current value of every cashier flag, plus the app appearance.
      */
     public function index(): JsonResponse
     {
-        return response()->json(['data' => Setting::cashierFlags()]);
+        return response()->json([
+            'data' => Setting::cashierFlags(),
+            'appearance' => Setting::appearance(),
+        ]);
     }
 
     /**
@@ -27,11 +31,14 @@ class AdminController extends Controller
     public function update(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'flags' => ['required', 'array'],
+            'flags' => ['sometimes', 'array'],
             'flags.*' => ['sometimes', 'boolean'],
+            'appearance' => ['sometimes', 'array'],
+            'appearance.mode' => ['sometimes', Rule::in(Setting::THEME_MODES)],
+            'appearance.accent' => ['sometimes', Rule::in(Setting::THEME_ACCENTS)],
         ]);
 
-        foreach ($validated['flags'] as $key => $value) {
+        foreach ($validated['flags'] ?? [] as $key => $value) {
             if (! $this->isCashierFlag($key)) {
                 continue;
             }
@@ -46,7 +53,79 @@ class AdminController extends Controller
             );
         }
 
-        return response()->json(['data' => Setting::cashierFlags()]);
+        foreach (['mode' => 'app.theme_mode', 'accent' => 'app.theme_accent'] as $field => $settingKey) {
+            $value = $validated['appearance'][$field] ?? null;
+
+            if ($value === null) {
+                continue;
+            }
+
+            Setting::query()->updateOrCreate(
+                ['key' => $settingKey],
+                [
+                    'group' => 'app',
+                    'value' => $value,
+                    'label' => $field === 'mode' ? 'Mode Tampilan' : 'Warna Aksen',
+                    'is_active' => true,
+                ]
+            );
+        }
+
+        return response()->json([
+            'data' => Setting::cashierFlags(),
+            'appearance' => Setting::appearance(),
+        ]);
+    }
+
+    /**
+     * Every product category with its product count, in the admin display order.
+     */
+    public function categories(): JsonResponse
+    {
+        $counts = Product::query()
+            ->selectRaw("COALESCE(category, 'Lainnya') as name, COUNT(*) as total")
+            ->groupByRaw("COALESCE(category, 'Lainnya')")
+            ->pluck('total', 'name')
+            ->all();
+
+        $order = Setting::categoryOrder();
+        $position = fn (string $name): int => ($index = array_search($name, $order, true)) === false ? PHP_INT_MAX : $index;
+
+        $sorted = collect(array_keys($counts))
+            ->sort(fn (string $a, string $b): int => $position($a) <=> $position($b) ?: strnatcasecmp($a, $b))
+            ->values();
+
+        return response()->json([
+            'data' => $sorted->map(fn (string $name): array => [
+                'name' => $name,
+                'total' => (int) $counts[$name],
+            ])->all(),
+        ]);
+    }
+
+    /**
+     * Store the display order of the product categories.
+     */
+    public function updateCategoryOrder(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'order' => ['required', 'array'],
+            'order.*' => ['required', 'string', 'distinct', 'max:100'],
+        ]);
+
+        $order = array_values($validated['order']);
+        $known = $this->categoryNames();
+
+        if (array_diff($order, $known) || array_diff($known, $order)) {
+            return response()->json([
+                'message' => 'Urutan kategori harus memuat seluruh kategori yang ada.',
+                'errors' => ['order' => ['Urutan kategori tidak lengkap atau tidak dikenal.']],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        Setting::saveCategoryOrder($order);
+
+        return $this->categories();
     }
 
     /**
@@ -214,5 +293,19 @@ class AdminController extends Controller
     private function isCashierFlag(string $key): bool
     {
         return in_array($key, array_keys(Setting::cashierFlags()), true);
+    }
+
+    /**
+     * Every category name currently used by a product.
+     *
+     * @return array<int, string>
+     */
+    private function categoryNames(): array
+    {
+        return Product::query()
+            ->selectRaw('COALESCE(category, ?) as name', ['Lainnya'])
+            ->distinct()
+            ->pluck('name')
+            ->all();
     }
 }

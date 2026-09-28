@@ -150,7 +150,7 @@ export default function WaiterDashboard() {
                                         </div>
                                     </div>
 
-                                    <div className="my-3 bg-gray-50 rounded-xl p-3 space-y-1">
+                                    <div className="my-3 bg-surface-2 rounded-xl p-3 space-y-1">
                                         {order.items.map((item) => (
                                             <div key={item.id} className="flex justify-between text-sm">
                                                 <span>{item.qty} × {item.product?.name}</span>
@@ -196,21 +196,21 @@ export default function WaiterDashboard() {
                             ) : (
                                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                                     {cart.map((line) => (
-                                        <div key={line.product_id} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
+                                        <div key={line.product_id} className="flex items-center gap-2 bg-surface-2 rounded-xl p-2">
                                             <div className="flex-1 min-w-0">
                                                 <div className="text-sm font-semibold truncate">{line.name}</div>
                                                 <div className="text-xs text-muted">{formatIDR(line.price)}</div>
                                             </div>
                                             <div className="flex items-center gap-1">
-                                                <button onClick={() => updateQty(line.product_id, -1)} className="btn-icon bg-white w-7 h-7 border border-gray-200">
+                                                <button onClick={() => updateQty(line.product_id, -1)} className="btn-icon bg-surface-2 w-7 h-7">
                                                     <Minus size={14} />
                                                 </button>
                                                 <span className="w-6 text-center font-semibold text-sm">{line.qty}</span>
-                                                <button onClick={() => updateQty(line.product_id, 1)} className="btn-icon bg-orange-100 text-orange-700 w-7 h-7">
+                                                <button onClick={() => updateQty(line.product_id, 1)} className="btn-icon bg-accent-soft text-accent-ink w-7 h-7">
                                                     <Plus size={14} />
                                                 </button>
                                             </div>
-                                            <button onClick={() => removeLine(line.product_id)} className="text-red-500 hover:text-red-700 p-1">
+                                            <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1">
                                                 <Trash2 size={15} />
                                             </button>
                                         </div>
@@ -220,25 +220,25 @@ export default function WaiterDashboard() {
 
                             <div className="mb-3">
                                 <label className="label flex items-center gap-1"><Percent size={13} /> Diskon (Rp)</label>
-                                <input type="number" min="0" className="input" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} placeholder="0" />
+                                <input type="number" min="0" inputMode="numeric" className="input [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} placeholder="0" />
                             </div>
 
                             <div className="mb-3">
                                 <label className="label">PPN (%)</label>
-                                <input type="number" min="0" className="input" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} />
+                                <input type="number" min="0" inputMode="numeric" className="input [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} />
                             </div>
 
-                            <div className="space-y-1.5 text-sm border-t border-gray-200 pt-3 mb-3">
+                            <div className="space-y-1.5 text-sm pt-3 mb-3">
                                 <div className="flex justify-between"><span className="text-muted">Subtotal</span><span>{formatIDR(totals.subtotal)}</span></div>
-                                <div className="flex justify-between"><span className="text-muted">Diskon</span><span className="text-red-500">-{formatIDR(totals.discount)}</span></div>
+                                <div className="flex justify-between"><span className="text-muted">Diskon</span><span className="text-negative">-{formatIDR(totals.discount)}</span></div>
                                 <div className="flex justify-between"><span className="text-muted">PPN</span><span>{formatIDR(totals.tax)}</span></div>
-                                <div className="flex justify-between items-center font-bold text-lg pt-2 border-t border-gray-200">
+                                <div className="flex justify-between items-center font-bold text-lg pt-2 border-t border-line">
                                     <span>Total</span>
-                                    <span className="text-orange-600">{formatIDR(totals.total)}</span>
+                                    <span className="text-accent">{formatIDR(totals.total)}</span>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-2 mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2">
+                            <div className="flex items-center gap-2 mb-3 text-xs alert-warning rounded-xl p-2">
                                 <ReceiptText size={14} /> Status pembayaran: otomatis Bayar Nanti (served by kasir).
                             </div>
 

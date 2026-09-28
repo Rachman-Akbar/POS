@@ -18,7 +18,7 @@ class ProductFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => fake()->randomElement(['Nasi Goreng', 'Mie Goreng', 'Ayam Geprek', 'Es Teh Manis', 'Kopi Hitam', 'Sate Ayam']),
+            'name' => fake()->unique()->randomElement(['Nasi Goreng', 'Mie Goreng', 'Ayam Geprek', 'Es Teh Manis', 'Kopi Hitam', 'Sate Ayam']),
             'description' => fake()->sentence(),
             'price' => fake()->randomFloat(0, 5000, 75000),
             'cost_price' => fake()->randomFloat(0, 2000, 40000),

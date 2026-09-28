@@ -6,8 +6,8 @@ function ProductImage({ product, className = '' }) {
     const [err, setErr] = useState(false);
     if (!product.image || err) {
         return (
-            <div className={`bg-gray-100 flex items-center justify-center ${className}`}>
-                <ImageOff size={28} className="text-gray-300" />
+            <div className={`bg-surface-3 flex items-center justify-center ${className}`}>
+                <ImageOff size={28} className="text-faint" />
             </div>
         );
     }
@@ -19,10 +19,20 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
 
     useEffect(() => {
         setQty(1);
-        const handler = (e) => e.key === 'Escape' && onClose();
+    }, [product]);
+
+    useEffect(() => {
+        const handler = (event) => {
+            if (event.key === 'Escape') onClose();
+            if (event.key === 'Enter' && !event.shiftKey && product && product.stock > 0) {
+                event.preventDefault();
+                onAdd(product, qty);
+                onClose();
+            }
+        };
         document.addEventListener('keydown', handler);
         return () => document.removeEventListener('keydown', handler);
-    }, [product, onClose]);
+    }, [product, qty, onAdd, onClose]);
 
     if (!product) return null;
 
@@ -31,7 +41,7 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl w-full max-w-md overflow-hidden"
+                className="bg-surface rounded-2xl w-full max-w-md overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
             >
                 <ProductImage product={product} className="w-full aspect-[4/3] object-cover" />
@@ -42,13 +52,13 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
                             <span className="text-[11px] font-semibold text-muted uppercase tracking-wide">{product.category ?? 'Lainnya'}</span>
                             <h3 className="text-lg font-bold leading-snug">{product.name}</h3>
                         </div>
-                        <button onClick={onClose} className="btn-icon w-9 h-9 text-muted hover:bg-gray-100">
+                        <button onClick={onClose} className="btn-icon w-9 h-9 text-muted hover:bg-surface-3">
                             <X size={18} />
                         </button>
                     </div>
 
                     <div className="flex items-center gap-2 mt-2 mb-3">
-                        <span className="text-xl font-bold text-orange-600">{formatIDR(product.price)}</span>
+                        <span className="text-xl font-bold text-accent">{formatIDR(product.price)}</span>
                         {product.stock > 0 ? (
                             <span className="badge badge-done">Stok {product.stock}</span>
                         ) : (
@@ -59,12 +69,12 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
                     {product.description && <p className="text-sm text-muted mb-4">{product.description}</p>}
 
                     <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1 border border-gray-200 rounded-lg p-1">
-                            <button onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1 || outOfStock} className="btn-icon w-8 h-8 hover:bg-gray-100 disabled:opacity-40">
+                        <div className="flex items-center gap-1 bg-surface-2 rounded-lg p-1">
+                            <button onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1 || outOfStock} className="btn-icon w-8 h-8 hover:bg-surface-3 disabled:opacity-40">
                                 <Minus size={14} />
                             </button>
                             <span className="w-8 text-center font-bold">{qty}</span>
-                            <button onClick={() => setQty((q) => q + 1)} disabled={outOfStock} className="btn-icon w-8 h-8 bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-40">
+                            <button onClick={() => setQty((q) => q + 1)} disabled={outOfStock} className="btn-icon w-8 h-8 bg-accent-soft text-accent-ink hover:bg-accent-soft disabled:opacity-40">
                                 <Plus size={14} />
                             </button>
                         </div>
@@ -79,6 +89,12 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
                             <ShoppingCart size={16} /> {outOfStock ? 'Stok Habis' : 'Tambah ke Transaksi'}
                         </button>
                     </div>
+
+                    {!outOfStock && (
+                        <p className="text-[11px] text-muted mt-2 text-right">
+                            Tekan <kbd className="px-1.5 py-0.5 rounded bg-surface-2 font-semibold text-content">Enter</kbd> untuk masukkan keranjang
+                        </p>
+                    )}
                 </div>
             </div>
         </div>

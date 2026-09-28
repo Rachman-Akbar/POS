@@ -128,7 +128,7 @@ export default function KitchenDashboard() {
 
     const renderItemRow = (item) => {
         return (
-            <div key={item.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+            <div key={item.id} className="flex items-center justify-between gap-3 bg-surface-2 rounded-xl px-3 py-2">
                 <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm truncate">{item.product?.name}</div>
                     <div className="text-xs text-muted flex items-center gap-1">
@@ -136,8 +136,8 @@ export default function KitchenDashboard() {
                     </div>
                 </div>
 
-                <span className="badge badge-orange-600 shrink-0">
-                    <span className="text-orange-600 font-black text-base">{item.qty}×</span>
+                <span className="badge badge-accent shrink-0">
+                    <span className="text-accent font-black text-base">{item.qty}×</span>
                 </span>
 
                 <ItemStatusBadge status={item.status} />
@@ -148,7 +148,7 @@ export default function KitchenDashboard() {
     const renderOrder = (order, stage) => {
         const doneCount = order.items.filter((i) => i.status === 'done').length;
         return (
-            <div key={order.id} className="card !p-0 overflow-hidden border-t-4 border-t-transparent border-gray-200/80">
+            <div key={order.id} className="card !p-0 overflow-hidden border border-line">
                 <div
                     role="button"
                     tabIndex="0"
@@ -167,14 +167,14 @@ export default function KitchenDashboard() {
                     {order.items.filter((i) => i.status === stage.key).map(renderItemRow)}
                 </div>
 
-                <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl">
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-line bg-surface-2/60 rounded-b-2xl">
                     <span className="text-xs text-muted font-semibold">
                         {stage.label} · {doneCount}/{order.items.length} selesai
                     </span>
                     <button
                         type="button"
                         onClick={() => setSelectedId(order.id)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 hover:underline cursor-pointer"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-accent hover:underline cursor-pointer"
                     >
                         Detail <ArrowRight size={12} />
                     </button>
@@ -193,9 +193,9 @@ export default function KitchenDashboard() {
         }
 
         return (
-            <div className="border border-gray-200/80 rounded-2xl overflow-hidden bg-white shadow-sm">
+            <div className="border border-line rounded-2xl overflow-hidden">
                 <table className="w-full">
-                    <thead className="bg-gray-100/80">
+                    <thead className="border-b border-line">
                         <tr>
                             <th className="table-head">Pesanan</th>
                             <th className="table-head text-center">Qty</th>
@@ -214,7 +214,7 @@ export default function KitchenDashboard() {
                         const FolderIcon = open ? FolderOpen : Folder;
 
                         return (
-                            <tbody key={order.id} className="border-t border-gray-100 align-top">
+                            <tbody key={order.id} className="border-t border-line align-top">
                                 <tr
                                     className={`${meta.band} text-white cursor-pointer select-none`}
                                     onClick={() => toggleCollapsed(order.id)}
@@ -254,14 +254,14 @@ export default function KitchenDashboard() {
 
                                 {open &&
                                     order.items.map((item) => (
-                                        <tr key={item.id} className="border-t border-gray-50 hover:bg-orange-50/30">
+                                        <tr key={item.id} className="border-t border-line hover:bg-accent-soft/30">
                                             <td className="table-cell">
                                                 <div className="flex items-center gap-2 pl-7">
-                                                    <FileText size={13} className="text-gray-300 shrink-0" />
+                                                    <FileText size={13} className="text-faint shrink-0" />
                                                     <span className="font-semibold">{item.product?.name}</span>
                                                 </div>
                                             </td>
-                                            <td className="table-cell text-center font-black text-orange-600">{item.qty}×</td>
+                                            <td className="table-cell text-center font-black text-accent">{item.qty}×</td>
                                             <td className="table-cell text-center text-xs text-muted">-</td>
                                             <td className="table-cell text-center text-xs text-muted whitespace-nowrap">{formatTime(item.created_at)}</td>
                                             <td className="table-cell text-center">
@@ -271,7 +271,7 @@ export default function KitchenDashboard() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedId(order.id)}
-                                                    className="text-xs font-bold text-orange-600 hover:underline cursor-pointer"
+                                                    className="text-xs font-bold text-accent hover:underline cursor-pointer"
                                                 >
                                                     Detail
                                                 </button>
@@ -299,7 +299,7 @@ export default function KitchenDashboard() {
                 onClick={() => setSelectedId(null)}
             >
                 <div
-                    className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+                    className="bg-surface rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className={`flex items-center justify-between px-4 py-2.5 ${meta.band} text-white text-sm font-bold`}>
@@ -311,7 +311,7 @@ export default function KitchenDashboard() {
                         </button>
                     </div>
 
-                    <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100">
+                    <div className="px-4 py-3 flex items-center justify-between border-b border-line">
                         <div className="text-sm font-semibold">
                             Meja {selectedOrder.table_number ?? '-'}
                             <span className="block text-[11px] text-muted font-normal">{formatTime(selectedOrder.created_at, true)}</span>
@@ -325,14 +325,14 @@ export default function KitchenDashboard() {
 
                     <div className="p-4 space-y-2">
                         {selectedOrder.items.map((item) => (
-                            <div key={item.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                            <div key={item.id} className="flex items-center justify-between gap-3 bg-surface-2 rounded-xl px-3 py-2">
                                 <div className="flex-1 min-w-0">
                                     <div className="font-semibold text-sm truncate">{item.product?.name}</div>
                                     <div className="text-xs text-muted flex items-center gap-2">
                                         <span className="flex items-center gap-1">
                                             <Clock size={11} /> {formatTime(item.created_at)}
                                         </span>
-                                        <span className="text-orange-600 font-black">{item.qty}×</span>
+                                        <span className="text-accent font-black">{item.qty}×</span>
                                     </div>
                                 </div>
 
@@ -374,7 +374,7 @@ export default function KitchenDashboard() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                     {boardGroups.map((stage) => (
-                        <div key={stage.key} className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3 max-h-[calc(100vh-9rem)] flex flex-col">
+                        <div key={stage.key} className="rounded-2xl border border-line bg-surface-2 p-3 max-h-[calc(100vh-9rem)] flex flex-col">
                             <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${stage.band} text-white text-xs font-bold mb-3 shrink-0`}>
                                 <span className="flex items-center gap-1.5">
                                     <stage.icon size={14} /> {stage.label}

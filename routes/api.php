@@ -2,7 +2,10 @@
 
 use App\Http\Controllers\Api\AccountingController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\AdminProductController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\KitchenController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PaymentController;
@@ -44,6 +47,25 @@ Route::get('/accounting/chart-of-accounts', [AccountingController::class, 'chart
 Route::get('/admin/settings', [AdminController::class, 'index']);
 Route::put('/admin/settings', [AdminController::class, 'update']);
 Route::get('/cash-bank-accounts', [AdminController::class, 'cashBankAccounts']);
+Route::get('/categories', [AdminController::class, 'categories']);
+Route::put('/categories/order', [AdminController::class, 'updateCategoryOrder']);
+
+// Master data: kategori, produk, pelanggan
+Route::get('/admin/categories', [CategoryController::class, 'index']);
+Route::post('/admin/categories', [CategoryController::class, 'store']);
+Route::put('/admin/categories/order', [CategoryController::class, 'reorder']);
+Route::put('/admin/categories/{category}', [CategoryController::class, 'update']);
+Route::delete('/admin/categories/{category}', [CategoryController::class, 'destroy']);
+
+Route::get('/admin/products', [AdminProductController::class, 'index']);
+Route::post('/admin/products', [AdminProductController::class, 'store']);
+Route::put('/admin/products/{product}', [AdminProductController::class, 'update']);
+Route::delete('/admin/products/{product}', [AdminProductController::class, 'destroy']);
+
+Route::get('/admin/customers', [CustomerController::class, 'index']);
+Route::post('/admin/customers', [CustomerController::class, 'store']);
+Route::put('/admin/customers/{customer}', [CustomerController::class, 'update']);
+Route::delete('/admin/customers/{customer}', [CustomerController::class, 'destroy']);
 Route::post('/cash-bank-accounts', [AdminController::class, 'storeCashBankAccount']);
 Route::get('/cash-bank-accounts/{cashBankAccount}/mutations', [AdminController::class, 'accountMutations']);
 Route::put('/cash-bank-accounts/{cashBankAccount}', [AdminController::class, 'updateCashBankAccount']);

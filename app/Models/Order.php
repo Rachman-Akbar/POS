@@ -15,6 +15,7 @@ class Order extends Model
     protected $fillable = [
         'order_number',
         'table_number',
+        'customer_id',
         'user_id',
         'payment_type',
         'status',
@@ -34,6 +35,14 @@ class Order extends Model
         'discount' => 'decimal:2',
         'tax_amount' => 'decimal:2',
     ];
+
+    /**
+     * @return BelongsTo<Customer, $this>
+     */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
 
     /**
      * @return BelongsTo<User, $this>

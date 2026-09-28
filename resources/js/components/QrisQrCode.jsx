@@ -24,7 +24,7 @@ export default function QrisQrCode({ value, size = 'w-full aspect-square' }) {
     }, [value]);
 
     return (
-        <div className={`${size} bg-white rounded-xl overflow-hidden flex items-center justify-center border border-gray-200`}>
+        <div className={`${size} bg-white rounded-xl overflow-hidden flex items-center justify-center`}>
             {dataUrl ? (
                 <img src={dataUrl} alt="QRIS" className="w-full h-full object-contain p-2" />
             ) : (

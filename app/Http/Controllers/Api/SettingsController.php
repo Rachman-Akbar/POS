@@ -24,6 +24,8 @@ class SettingsController extends Controller
                 'receipt_footer' => Setting::get('pos.receipt_footer', 'Terima kasih!'),
                 'cashier' => Setting::cashierFlags(),
                 'table_numbers' => Setting::tableNumbers(),
+                'category_order' => Setting::categoryOrder(),
+                'appearance' => Setting::appearance(),
                 'payment_methods' => PaymentMethod::where('is_active', true)
                     ->with(['accounts' => fn ($query) => $query->where('is_active', true)->orderByDesc('is_default')->orderBy('name')])
                     ->orderBy('id')

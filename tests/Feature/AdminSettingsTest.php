@@ -57,6 +57,143 @@ class AdminSettingsTest extends TestCase
         $this->assertContains('1', $tables);
     }
 
+    public function test_admin_settings_expose_default_appearance(): void
+    {
+        $this->getJson('/api/admin/settings')
+            ->assertOk()
+            ->assertJsonPath('appearance.mode', 'light')
+            ->assertJsonPath('appearance.accent', 'system');
+    }
+
+    public function test_public_settings_expose_appearance(): void
+    {
+        Setting::query()->updateOrCreate(
+            ['key' => 'app.theme_mode'],
+            ['group' => 'app', 'value' => 'dark', 'is_active' => true]
+        );
+
+        $this->getJson('/api/settings')
+            ->assertOk()
+            ->assertJsonPath('data.appearance.mode', 'dark')
+            ->assertJsonPath('data.appearance.accent', 'system');
+    }
+
+    public function test_admin_can_update_appearance(): void
+    {
+        $this->putJson('/api/admin/settings', [
+            'appearance' => ['mode' => 'system', 'accent' => 'emerald'],
+        ])->assertOk()
+            ->assertJsonPath('appearance.mode', 'system')
+            ->assertJsonPath('appearance.accent', 'emerald');
+
+        $this->assertSame('system', Setting::get('app.theme_mode'));
+        $this->assertSame('emerald', Setting::get('app.theme_accent'));
+    }
+
+    public function test_appearance_rejects_unknown_mode_and_accent(): void
+    {
+        $this->putJson('/api/admin/settings', ['appearance' => ['mode' => 'neon']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('appearance.mode');
+
+        $this->putJson('/api/admin/settings', ['appearance' => ['accent' => 'chartreuse']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('appearance.accent');
+    }
+
+    public function test_appearance_falls_back_to_defaults_when_stored_value_is_unknown(): void
+    {
+        Setting::query()->updateOrCreate(
+            ['key' => 'app.theme_mode'],
+            ['group' => 'app', 'value' => 'neon', 'is_active' => true]
+        );
+        Setting::query()->updateOrCreate(
+            ['key' => 'app.theme_accent'],
+            ['group' => 'app', 'value' => 'chartreuse', 'is_active' => true]
+        );
+
+        $this->assertSame(['mode' => 'light', 'accent' => 'system'], Setting::appearance());
+    }
+
+    public function test_only_one_default_account_per_payment_method(): void
+    {
+        $method = PaymentMethod::create([
+            'code' => 'bca',
+            'type' => 'bank',
+            'name' => 'Transfer BCA',
+            'mdr_rate' => 0,
+            'is_active' => true,
+        ]);
+
+        $first = CashBankAccount::factory()->create([
+            'name' => 'BCA Utama',
+            'type' => 'bank',
+            'payment_method_id' => $method->id,
+            'is_default' => true,
+        ]);
+        $second = CashBankAccount::factory()->create([
+            'name' => 'BCA Cadangan',
+            'type' => 'bank',
+            'payment_method_id' => $method->id,
+            'is_default' => false,
+        ]);
+
+        $this->putJson("/api/cash-bank-accounts/{$second->id}", [
+            'name' => $second->name,
+            'type' => $second->type,
+            'payment_method_id' => $method->id,
+            'is_default' => true,
+        ])->assertOk();
+
+        $this->assertTrue($second->fresh()->is_default);
+        $this->assertFalse($first->fresh()->is_default);
+    }
+
+    public function test_admin_can_read_and_reorder_product_categories(): void
+    {
+        Product::factory()->create(['name' => 'Nasi Goreng', 'category' => 'Makanan']);
+        Product::factory()->create(['name' => 'Es Teh', 'category' => 'Minuman']);
+        Product::factory()->create(['name' => 'Kentang', 'category' => 'Snack']);
+
+        $this->getJson('/api/categories')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Makanan')
+            ->assertJsonPath('data.0.total', 1)
+            ->assertJsonPath('data.1.name', 'Minuman')
+            ->assertJsonPath('data.2.name', 'Snack');
+
+        $this->putJson('/api/categories/order', [
+            'order' => ['Snack', 'Minuman', 'Makanan'],
+        ])->assertOk()
+            ->assertJsonPath('data.0.name', 'Snack')
+            ->assertJsonPath('data.2.name', 'Makanan');
+
+        $this->assertSame(['Snack', 'Minuman', 'Makanan'], Setting::categoryOrder());
+        $this->getJson('/api/settings')
+            ->assertOk()
+            ->assertJsonPath('data.category_order.0', 'Snack');
+    }
+
+    public function test_category_order_rejects_incomplete_or_unknown_names(): void
+    {
+        Product::factory()->create(['category' => 'Makanan']);
+        Product::factory()->create(['category' => 'Minuman']);
+
+        $this->putJson('/api/categories/order', ['order' => ['Makanan']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('order');
+
+        $this->putJson('/api/categories/order', ['order' => ['Makanan', 'Minuman', 'Ghost']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('order');
+
+        $this->putJson('/api/categories/order', ['order' => ['Makanan', 'Makanan']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('order.1');
+
+        $this->assertSame([], Setting::categoryOrder());
+    }
+
     public function test_admin_can_create_bank_account(): void
     {
         $this->postJson('/api/cash-bank-accounts', [

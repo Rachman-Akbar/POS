@@ -22,6 +22,18 @@ class Setting extends Model
         'cashier_enable_prepay' => false,
     ];
 
+    /**
+     * Theme modes and accent colors selectable from the Admin panel.
+     *
+     * @var array<int, string>
+     */
+    public const THEME_MODES = ['light', 'dark', 'system'];
+
+    /**
+     * @var array<int, string>
+     */
+    public const THEME_ACCENTS = ['system', 'orange', 'blue', 'emerald', 'purple', 'rose', 'teal', 'pink', 'slate'];
+
     protected $fillable = [
         'key',
         'group',
@@ -71,6 +83,68 @@ class Setting extends Model
             return array_values(array_filter(array_map('trim', explode(',', (string) $raw)), fn ($t) => $t !== ''));
         }
 
-        return array_map(fn (int $n) => (string) $n, range(1, 20));
+        return array_map(fn (int $n): string => (string) $n, range(1, 20));
+    }
+
+    /**
+     * The display order of product categories set from the Admin panel.
+     *
+     * @return array<int, string>
+     */
+    public static function categoryOrder(): array
+    {
+        $raw = static::get('pos.category_order', '');
+        $decoded = $raw ? json_decode((string) $raw, true) : null;
+
+        if (! is_array($decoded)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('strval', $decoded), fn (string $name): bool => $name !== ''));
+    }
+
+    /**
+     * Persist the display order of product categories.
+     *
+     * @param  array<int, string>  $order
+     */
+    public static function saveCategoryOrder(array $order): void
+    {
+        static::query()->updateOrCreate(
+            ['key' => 'pos.category_order'],
+            [
+                'group' => 'pos',
+                'label' => 'Urutan Kategori',
+                'value' => json_encode(array_values($order), JSON_UNESCAPED_UNICODE),
+                'is_active' => true,
+            ]
+        );
+    }
+
+    /**
+     * The appearance used when nothing has been configured yet.
+     *
+     * @return array{mode: string, accent: string}
+     */
+    public static function defaultAppearance(): array
+    {
+        return ['mode' => 'light', 'accent' => 'system'];
+    }
+
+    /**
+     * The appearance (theme mode + accent color) applied across the app.
+     *
+     * @return array{mode: string, accent: string}
+     */
+    public static function appearance(): array
+    {
+        $defaults = self::defaultAppearance();
+        $mode = static::get('app.theme_mode', $defaults['mode']);
+        $accent = static::get('app.theme_accent', $defaults['accent']);
+
+        return [
+            'mode' => in_array($mode, self::THEME_MODES, true) ? $mode : $defaults['mode'],
+            'accent' => in_array($accent, self::THEME_ACCENTS, true) ? $accent : $defaults['accent'],
+        ];
     }
 }

@@ -8,8 +8,15 @@ export const api = axios.create({
     },
 });
 
-export const formatIDR = (value) =>
-    new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value ?? 0);
+export const rupiahParts = (value) => ({
+    symbol: 'Rp.',
+    amount: new Intl.NumberFormat('id-ID', { minimumFractionDigits: 0 }).format(Number(value ?? 0) || 0),
+});
+
+export const formatIDR = (value) => {
+    const { symbol, amount } = rupiahParts(value);
+    return `${symbol} ${amount}`;
+};
 
 export const formatPct = (value) => `${Number(value ?? 0).toLocaleString('id-ID', { minimumFractionDigits: 2 })}%`;
 

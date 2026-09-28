@@ -3,14 +3,216 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
+/*
+ * Semantic tokens. Utilities reference these variables (via `inline`) so a
+ * single attribute flip on <html> re-themes the whole app.
+ */
+@theme inline {
+    --color-page: var(--app-page);
+    --color-surface: var(--app-surface);
+    --color-surface-2: var(--app-surface-2);
+    --color-surface-3: var(--app-surface-3);
+    --color-line: var(--app-line);
+    --color-content: var(--app-content);
+    --color-muted: var(--app-muted);
+    --color-faint: var(--app-faint);
+    --color-accent: var(--app-accent);
+    --color-accent-hover: var(--app-accent-hover);
+    --color-accent-soft: var(--app-accent-soft);
+    --color-accent-ink: var(--app-accent-ink);
+    --color-on-accent: var(--app-on-accent);
+}
+
+@layer base {
+    :root {
+        --app-page: #f4f5f7;
+        --app-surface: var(--app-page);
+        --app-surface-2: #e9eaee;
+        --app-surface-3: #dedfe4;
+        --app-line: #e0e2e7;
+        --app-content: #111827;
+        --app-muted: #6b7280;
+        --app-faint: #9ca3af;
+        --app-on-accent: #ffffff;
+
+        --app-accent: #ea580c;
+        --app-accent-hover: #c2410c;
+        --app-accent-soft: #ffedd5;
+        --app-accent-ink: #c2410c;
+    }
+
+    [data-theme='dark'] {
+        --app-page: #0f1114;
+        --app-surface: var(--app-page);
+        --app-surface-2: #191c21;
+        --app-surface-3: #23262d;
+        --app-line: #24282f;
+        --app-content: #e9ebf0;
+        --app-muted: #9ba2ae;
+        --app-faint: #6b7280;
+    }
+
+    [data-accent='orange'] {
+        --app-accent: #ea580c;
+        --app-accent-hover: #c2410c;
+        --app-accent-soft: #ffedd5;
+        --app-accent-ink: #c2410c;
+    }
+    [data-accent='blue'] {
+        --app-accent: #2563eb;
+        --app-accent-hover: #1d4ed8;
+        --app-accent-soft: #dbeafe;
+        --app-accent-ink: #1d4ed8;
+    }
+    [data-accent='emerald'] {
+        --app-accent: #059669;
+        --app-accent-hover: #047857;
+        --app-accent-soft: #d1fae5;
+        --app-accent-ink: #047857;
+    }
+    [data-accent='purple'] {
+        --app-accent: #9333ea;
+        --app-accent-hover: #7e22ce;
+        --app-accent-soft: #f3e8ff;
+        --app-accent-ink: #7e22ce;
+    }
+    [data-accent='rose'] {
+        --app-accent: #e11d48;
+        --app-accent-hover: #be123c;
+        --app-accent-soft: #ffe4e6;
+        --app-accent-ink: #be123c;
+    }
+    [data-accent='teal'] {
+        --app-accent: #0d9488;
+        --app-accent-hover: #0f766e;
+        --app-accent-soft: #ccfbf1;
+        --app-accent-ink: #0f766e;
+    }
+    [data-accent='pink'] {
+        --app-accent: #db2777;
+        --app-accent-hover: #be185d;
+        --app-accent-soft: #fce7f3;
+        --app-accent-ink: #be185d;
+    }
+    [data-accent='slate'] {
+        --app-accent: #475569;
+        --app-accent-hover: #334155;
+        --app-accent-soft: #e2e8f0;
+        --app-accent-ink: #334155;
+    }
+    [data-accent='system'] {
+        --app-accent: #2563eb;
+        --app-accent-hover: #1d4ed8;
+        --app-accent-soft: #dbeafe;
+        --app-accent-ink: #1d4ed8;
+    }
+
+    @supports (color: AccentColor) {
+        [data-accent='system'] {
+            --app-accent: AccentColor;
+            --app-accent-hover: AccentColor;
+            --app-accent-soft: color-mix(in oklab, AccentColor 18%, transparent);
+            --app-accent-ink: AccentColor;
+        }
+    }
+
+    [data-theme='dark'] {
+        --app-accent-soft: rgb(255 255 255 / 0.08);
+    }
+    [data-theme='dark'][data-accent='orange'] {
+        --app-accent-soft: rgb(249 115 22 / 0.18);
+    }
+    [data-theme='dark'][data-accent='blue'] {
+        --app-accent-soft: rgb(37 99 235 / 0.18);
+    }
+    [data-theme='dark'][data-accent='emerald'] {
+        --app-accent-soft: rgb(5 150 105 / 0.18);
+    }
+    [data-theme='dark'][data-accent='purple'] {
+        --app-accent-soft: rgb(147 51 234 / 0.2);
+    }
+    [data-theme='dark'][data-accent='rose'] {
+        --app-accent-soft: rgb(225 29 72 / 0.2);
+    }
+    [data-theme='dark'][data-accent='orange'] {
+        --app-accent: #fb923c;
+        --app-accent-hover: #f97316;
+        --app-accent-ink: #fdba74;
+    }
+    [data-theme='dark'][data-accent='blue'] {
+        --app-accent: #60a5fa;
+        --app-accent-hover: #3b82f6;
+        --app-accent-ink: #93c5fd;
+    }
+    [data-theme='dark'][data-accent='emerald'] {
+        --app-accent: #34d399;
+        --app-accent-hover: #10b981;
+        --app-accent-ink: #6ee7b7;
+    }
+    [data-theme='dark'][data-accent='purple'] {
+        --app-accent: #c084fc;
+        --app-accent-hover: #a855f7;
+        --app-accent-ink: #d8b4fe;
+    }
+    [data-theme='dark'][data-accent='rose'] {
+        --app-accent: #fb7185;
+        --app-accent-hover: #f43f5e;
+        --app-accent-ink: #fda4af;
+    }
+    [data-theme='dark'][data-accent='teal'] {
+        --app-accent-soft: rgb(13 148 136 / 0.18);
+        --app-accent: #2dd4bf;
+        --app-accent-hover: #14b8a6;
+        --app-accent-ink: #5eead4;
+    }
+    [data-theme='dark'][data-accent='pink'] {
+        --app-accent-soft: rgb(219 39 119 / 0.2);
+        --app-accent: #f472b6;
+        --app-accent-hover: #ec4899;
+        --app-accent-ink: #f9a8d4;
+    }
+    [data-theme='dark'][data-accent='slate'] {
+        --app-accent-soft: rgb(100 116 139 / 0.24);
+        --app-accent: #94a3b8;
+        --app-accent-hover: #64748b;
+        --app-accent-ink: #cbd5e1;
+    }
+    [data-theme='dark'][data-accent='system'] {
+        --app-accent-soft: rgb(37 99 235 / 0.26);
+        --app-accent: #60a5fa;
+        --app-accent-hover: #3b82f6;
+        --app-accent-ink: #93c5fd;
+    }
+
+    @supports (color: AccentColor) {
+        [data-theme='dark'][data-accent='system'] {
+            --app-accent-soft: color-mix(in oklab, AccentColor 24%, transparent);
+            --app-accent: AccentColor;
+            --app-accent-hover: AccentColor;
+            --app-accent-ink: AccentColor;
+        }
+    }
+
+    body {
+        @apply bg-page text-content;
+    }
+}
+
 @layer components {
+    /*
+     * Flat layout: every surface shares the page background, so cards blend
+     * into the shell instead of sitting inside a bordered box. Only the app
+     * header, tables and the kanban board keep a single 1px separator.
+     */
     .card {
-        @apply bg-white rounded-xl border border-gray-100 p-5;
+        @apply bg-surface rounded-xl p-5;
     }
     .scrollbar-none {
         scrollbar-width: none;
@@ -20,7 +222,7 @@
     }
     .scrollbar-thin {
         scrollbar-width: thin;
-        scrollbar-color: rgb(209 213 219) transparent;
+        scrollbar-color: var(--app-line) transparent;
     }
     .scrollbar-thin::-webkit-scrollbar {
         width: 6px;
@@ -30,23 +232,23 @@
         background: transparent;
     }
     .scrollbar-thin::-webkit-scrollbar-thumb {
-        background-color: rgb(209 213 219);
+        background-color: var(--app-line);
         border-radius: 9999px;
     }
     .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-        background-color: rgb(156 163 175);
+        background-color: var(--app-faint);
     }
     .btn {
         @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer border border-transparent;
     }
     .btn-primary {
-        @apply bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed;
+        @apply bg-accent text-on-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed;
     }
     .btn-secondary {
-        @apply bg-gray-100 text-gray-700 hover:bg-gray-200;
+        @apply bg-surface-3 text-content hover:bg-surface-2;
     }
     .btn-ghost {
-        @apply bg-white text-gray-600 border-gray-200 hover:bg-gray-50;
+        @apply bg-surface-2 text-muted hover:bg-surface-3;
     }
     .btn-success {
         @apply bg-emerald-600 text-white hover:bg-emerald-700;
@@ -61,55 +263,64 @@
         @apply w-10 h-10 rounded-lg flex items-center justify-center;
     }
     .label {
-        @apply block text-sm font-medium text-gray-700 mb-1;
+        @apply block text-sm font-medium text-content mb-1;
     }
     .input {
-        @apply w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-orange-400;
+        @apply w-full rounded-lg bg-surface-2 px-3 py-2.5 text-sm text-content placeholder:text-faint focus:outline-none focus:ring-1 focus:ring-accent;
     }
     .select {
-        @apply w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-orange-400;
+        @apply w-full rounded-lg bg-surface-2 px-3 py-2.5 text-sm text-content focus:outline-none focus:ring-1 focus:ring-accent;
     }
     .alert {
         @apply px-4 py-3 rounded-lg text-sm;
     }
     .alert-danger {
-        @apply bg-red-50 text-red-700 border border-red-100;
+        @apply bg-red-50 text-red-700 border border-red-100 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30;
     }
     .alert-success {
-        @apply bg-emerald-50 text-emerald-700 border border-emerald-100;
+        @apply bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30;
+    }
+    .alert-warning {
+        @apply bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/30;
+    }
+    .text-positive {
+        @apply text-emerald-700 dark:text-emerald-400;
+    }
+    .text-negative {
+        @apply text-red-600 dark:text-red-400;
     }
     .text-muted {
-        @apply text-gray-500;
+        color: var(--app-muted);
     }
     .badge {
         @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
     }
     .badge-pending {
-        @apply bg-gray-100 text-gray-600;
+        @apply bg-surface-3 text-muted;
     }
     .badge-cooking {
-        @apply bg-amber-100 text-amber-800;
+        @apply bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300;
     }
     .badge-prepared {
-        @apply bg-blue-100 text-blue-800;
+        @apply bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300;
     }
     .badge-done {
-        @apply bg-emerald-100 text-emerald-800;
+        @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300;
     }
     .badge-completed {
-        @apply bg-gray-200 text-gray-600;
+        @apply bg-surface-3 text-muted;
     }
     .badge-unpaid {
-        @apply bg-red-100 text-red-700;
+        @apply bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300;
     }
     .badge-paid {
-        @apply bg-emerald-100 text-emerald-800;
+        @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300;
     }
-    .badge-orange-600 {
-        @apply bg-orange-100 text-orange-700;
+    .badge-accent {
+        @apply bg-accent-soft text-accent-ink;
     }
     .table-head {
-        @apply text-left text-xs font-medium uppercase tracking-wide text-gray-400 px-4 py-3;
+        @apply text-left text-xs font-medium uppercase tracking-wide text-faint px-4 py-3;
     }
     .table-cell {
         @apply px-4 py-3 text-sm;

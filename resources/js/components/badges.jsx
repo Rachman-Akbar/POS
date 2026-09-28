@@ -37,10 +37,10 @@ export function PaymentBadge({ status }) {
 }
 
 export const PAY_METHOD_STYLE = {
-    cash: 'bg-emerald-100 text-emerald-800',
-    bank: 'bg-blue-100 text-blue-800',
-    qris: 'bg-purple-100 text-purple-800',
-    ewallet: 'bg-pink-100 text-pink-800',
+    cash: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+    bank: 'bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-300',
+    qris: 'bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-300',
+    ewallet: 'bg-pink-100 text-pink-800 dark:bg-pink-500/15 dark:text-pink-300',
 };
 
 export const PAY_METHOD_LABEL = { cash: 'Tunai', bank: 'Transfer', qris: 'QRIS', ewallet: 'E-Wallet' };
