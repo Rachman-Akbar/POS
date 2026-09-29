@@ -12,6 +12,8 @@ export default function CategoryFilter({
     allLabel = 'Semua Kategori',
     favoritesLabel = 'Favorit',
     favoritesCount = 0,
+    searchPlaceholder = 'Cari kategori...',
+    emptyLabel = 'Kategori tidak ditemukan.',
 }) {
     const [open, setOpen] = useState(false);
     const [term, setTerm] = useState('');
@@ -19,11 +21,20 @@ export default function CategoryFilter({
 
     const active = categories.find((c) => c.name === value) ?? null;
     const favoritesActive = value === FAVORITES;
-    const labelOf = (name) => (name === ALL ? allLabel : name === FAVORITES ? favoritesLabel : (categories.find((c) => c.name === name)?.name ?? name));
+
+    // `name` adalah nilai yang dikembalikan ke onChange, sedangkan `label`
+    // opsional untuk ditampilkan. Tanpa `label`, `name` dipakai langsung.
+    const labelOf = (name) => {
+        if (name === ALL) return allLabel;
+        if (name === FAVORITES) return favoritesLabel;
+        const found = categories.find((c) => c.name === name);
+        return found?.label ?? found?.name ?? name;
+    };
 
     const options = useMemo(() => {
         const needle = term.trim().toLowerCase();
-        return needle ? categories.filter((c) => c.name.toLowerCase().includes(needle)) : categories;
+        if (!needle) return categories;
+        return categories.filter((c) => (c.label ?? c.name).toLowerCase().includes(needle));
     }, [categories, term]);
 
     const showFavorites = favoritesCount > 0 && !term.trim();
@@ -35,7 +46,7 @@ export default function CategoryFilter({
 
     const pick = (name) => {
         onChange?.(name);
-        setTerm(name === ALL ? '' : name === FAVORITES ? favoritesLabel : name);
+        setTerm(name === ALL ? '' : labelOf(name));
         setOpen(false);
     };
 
@@ -62,15 +73,15 @@ export default function CategoryFilter({
                         pick(options[0].name);
                     }
                 }}
-                placeholder="Cari kategori..."
-                title="Cari dan filter kategori"
+                placeholder={searchPlaceholder}
+                title={searchPlaceholder}
                 className="input !pl-9 !pr-8"
             />
             {filtering && (
                 <button
                     type="button"
                     onClick={() => pick(ALL)}
-                    title="Hapus filter kategori"
+                    title={`Hapus filter: ${allLabel}`}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-content cursor-pointer"
                 >
                     <X size={14} />
@@ -101,14 +112,14 @@ export default function CategoryFilter({
                                 onClick={() => pick(category.name)}
                                 className={optionClass(active?.name === category.name)}
                             >
-                                <span className="truncate">{category.name}</span>
+                                <span className="truncate">{category.label ?? category.name}</span>
                                 <span className="ml-auto text-[11px] text-muted">{category.count}</span>
                                 {active?.name === category.name && <Check size={14} />}
                             </button>
                         ))}
 
                         {options.length === 0 && !showFavorites && (
-                            <p className="text-xs text-muted text-center py-4">Kategori tidak ditemukan.</p>
+                            <p className="text-xs text-muted text-center py-4">{emptyLabel}</p>
                         )}
                     </div>
                 </div>

@@ -13,7 +13,7 @@ enum ItemStatus: string
     {
         return match ($this) {
             self::Pending => 'Dipesan',
-            self::Cooking => 'Diproses',
+            self::Cooking => 'Dimasak',
             self::Sent => 'Dikirim',
             self::Done => 'Selesai',
         };

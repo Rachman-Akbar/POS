@@ -34,6 +34,7 @@ export default function FormModal({
     pending = false,
     disabled = false,
     width = 'max-w-md',
+    footer = null,
     children,
 }) {
     useEffect(() => {
@@ -65,14 +66,16 @@ export default function FormModal({
 
                 <div className="overflow-y-auto px-5 py-4">{children}</div>
 
-                <div className="px-5 py-3 border-t border-line flex items-center justify-end gap-2">
-                    <button className="btn btn-ghost" onClick={onClose} disabled={pending}>
-                        Batal
-                    </button>
-                    <button className="btn btn-primary" onClick={onSubmit} disabled={disabled || pending}>
-                        {pending ? 'Menyimpan...' : submitLabel}
-                    </button>
-                </div>
+                {footer ?? (
+                    <div className="px-5 py-3 border-t border-line flex items-center justify-end gap-2">
+                        <button className="btn btn-ghost" onClick={onClose} disabled={pending}>
+                            Batal
+                        </button>
+                        <button className="btn btn-primary" onClick={onSubmit} disabled={disabled || pending}>
+                            {pending ? 'Menyimpan...' : submitLabel}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

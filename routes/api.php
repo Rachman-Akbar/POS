@@ -26,6 +26,9 @@ Route::patch('/products/{product}/favorite', [ProductController::class, 'toggleF
 // Waiter / order flow
 Route::get('/orders', [OrderController::class, 'index']);
 Route::post('/orders', [OrderController::class, 'store']);
+Route::post('/orders/draft', [OrderController::class, 'storeDraft']);
+Route::get('/orders/transactions', [OrderController::class, 'transactions']);
+Route::post('/orders/{order}/finalize', [OrderController::class, 'finalizeDraft']);
 Route::get('/orders/{order}', [OrderController::class, 'show']);
 Route::post('/orders/{order}/complete', [OrderController::class, 'complete']);
 
@@ -39,6 +42,7 @@ Route::patch('/kitchen/items/{item}/status', [KitchenController::class, 'updateI
 
 // Cashier flow
 Route::get('/payments/pending', [PaymentController::class, 'pending']);
+Route::get('/payments/invoices', [PaymentController::class, 'invoices']);
 Route::get('/payments/today', [PaymentController::class, 'today']);
 Route::get('/payments/unpaid-orders', [PaymentController::class, 'unpaidOrders']);
 Route::post('/payments/orders/{order}/settle', [PaymentController::class, 'settle']);

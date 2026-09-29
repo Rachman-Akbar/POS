@@ -44,6 +44,42 @@ class KitchenFlowTest extends TestCase
         return Order::firstOrFail();
     }
 
+    /**
+     * Produksi dapur punya empat tahap: pesanan masuk sebagai "Dipesan", lalu
+     * Dimasak, Dikirim, Selesai. Tidak ada tahap "Draf" karena draft hanya
+     * menampung transaksi sementara dan tidak pernah masuk papan dapur.
+     */
+    public function test_item_status_exposes_four_production_stages(): void
+    {
+        $this->assertSame(
+            ['pending', 'cooking', 'sent', 'done'],
+            array_column(ItemStatus::cases(), 'value'),
+        );
+
+        $this->assertSame(
+            ['Dipesan', 'Dimasak', 'Dikirim', 'Selesai'],
+            array_map(fn (ItemStatus $status) => $status->label(), ItemStatus::cases()),
+        );
+    }
+
+    public function test_production_stages_advance_in_order(): void
+    {
+        $this->assertSame(ItemStatus::Cooking, ItemStatus::Pending->next());
+        $this->assertSame(ItemStatus::Sent, ItemStatus::Cooking->next());
+        $this->assertSame(ItemStatus::Done, ItemStatus::Sent->next());
+        $this->assertNull(ItemStatus::Done->next());
+    }
+
+    public function test_new_order_items_enter_the_kitchen_as_dipesan(): void
+    {
+        $order = $this->createOrder();
+
+        $this->assertSame(
+            ItemStatus::Pending->value,
+            $order->items()->firstOrFail()->status,
+        );
+    }
+
     public function test_kitchen_queue_contains_pending_items(): void
     {
         $order = $this->createOrder();

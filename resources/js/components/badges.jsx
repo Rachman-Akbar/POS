@@ -5,7 +5,7 @@ export const ORDER_STATUS = {
 
 export const ITEM_STATUS = {
     pending: { label: 'Dipesan', badge: 'badge-pending' },
-    cooking: { label: 'Diproses', badge: 'badge-cooking' },
+    cooking: { label: 'Dimasak', badge: 'badge-cooking' },
     sent: { label: 'Dikirim', badge: 'badge-prepared' },
     done: { label: 'Selesai', badge: 'badge-done' },
 };

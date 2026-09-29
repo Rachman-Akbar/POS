@@ -10,6 +10,8 @@ use App\Http\Controllers\Controller;
 use App\Models\OrderItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\Response;
 
 class KitchenController extends Controller
 {
@@ -17,10 +19,12 @@ class KitchenController extends Controller
 
     /**
      * Kitchen display — all order items still being produced, grouped by status.
+     * Drafts are excluded: a draft is an unprocessed order that has not been
+     * finalized, so it has not reached the kitchen.
      */
     public function index(): JsonResponse
     {
-        $items = OrderItem::whereHas('order', fn ($query) => $query->where('status', '!=', OrderStatus::Completed->value))
+        $items = OrderItem::whereHas('order', fn ($query) => $query->where('status', OrderStatus::Pending->value))
             ->with(['product', 'order'])
             ->orderBy('created_at')
             ->get();
@@ -44,8 +48,16 @@ class KitchenController extends Controller
     public function updateItemStatus(Request $request, OrderItem $item): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:pending,cooking,sent,done'],
+            'status' => ['required', Rule::enum(ItemStatus::class)],
         ]);
+
+        // Draft belum diproses, jadi itemnya tidak boleh diubah tahap produksi.
+        if ($item->order?->status === OrderStatus::Draft->value) {
+            return response()->json(
+                ['message' => 'Item draft belum diproses dan tidak bisa diubah tahapnya.'],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
 
         $previous = $item->status;
         $item->update(['status' => $data['status']]);

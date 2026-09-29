@@ -55,6 +55,42 @@ class PaymentFlowTest extends TestCase
             ->assertJsonCount(1, 'data');
     }
 
+    /**
+     * Tabel "Pesanan" menampilkan seluruh transaksi, bukan hanya faktur
+     * gantung: yang sudah lunas tetap ikut agar terlihat riwayatnya.
+     */
+    public function test_cashier_sees_every_invoice_not_only_unpaid_ones(): void
+    {
+        $this->createPayLaterOrder();
+        $unsettled = $this->createPayLaterOrder();
+
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$unsettled->id}/settle", [
+            'payment_method' => 'qris',
+        ])->assertOk();
+
+        $this->actingAs($this->cashier)->getJson('/api/payments/invoices')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->actingAs($this->cashier)->getJson('/api/payments/pending')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+    }
+
+    public function test_invoice_list_carries_amounts_and_process_state_for_the_table(): void
+    {
+        $order = $this->createPayLaterOrder();
+
+        $response = $this->actingAs($this->cashier)->getJson('/api/payments/invoices');
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.invoice_number', $order->invoice->invoice_number)
+            ->assertJsonPath('data.0.total_amount', number_format((float) $order->total_amount, 2, '.', ''))
+            ->assertJsonPath('data.0.receipts', [])
+            ->assertJsonPath('data.0.order.order_number', $order->order_number)
+            ->assertJsonPath('data.0.order.items.0.status', 'pending');
+    }
+
     public function test_cashier_settles_pay_later_invoice(): void
     {
         $order = $this->createPayLaterOrder();
@@ -125,5 +161,52 @@ class PaymentFlowTest extends TestCase
 
         $this->assertSame(round($debit, 2), round($credit, 2));
         $this->assertSame(round((float) $order->total_amount, 2), round($credit, 2));
+    }
+
+    public function test_settling_more_than_remaining_records_only_the_balance_and_returns_change(): void
+    {
+        $order = $this->createPayLaterOrder();
+        $total = (float) $order->total_amount;
+        $tendered = round($total + 20_000, 2);
+
+        $response = $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$order->id}/settle", [
+            'payment_method' => 'cash',
+            'amount' => $tendered,
+        ]);
+
+        $response->assertOk();
+
+        $this->assertSame(20_000.0, (float) $response->json('data.change'));
+        $this->assertSame($total, (float) $response->json('data.applied'));
+
+        // Only the balance is recorded: overpayment never inflates revenue.
+        $this->assertSame(1, $order->invoice->receipts()->count());
+        $this->assertSame($total, (float) $order->invoice->receipts()->firstOrFail()->gross_amount);
+        $this->assertSame($total, (float) $order->refresh()->paid_amount);
+        $this->assertSame(PaymentStatus::Paid->value, $order->payment_status);
+
+        $entry = JournalEntry::where('type', 'sales_receipt')->firstOrFail();
+        $this->assertSame(
+            round((float) $entry->details->sum('debit'), 2),
+            round((float) $entry->details->sum('credit'), 2),
+        );
+        $this->assertSame($total, (float) $entry->details->sum('credit'));
+    }
+
+    public function test_settling_with_change_still_records_the_settled_amount_in_the_journal(): void
+    {
+        $order = $this->createPayLaterOrder();
+        $total = (float) $order->total_amount;
+
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$order->id}/settle", [
+            'payment_method' => 'cash',
+            'amount' => round($total * 2, 2),
+        ])->assertOk();
+
+        $this->assertSame($total, (float) $order->invoice->receipts()->sum('gross_amount'));
+
+        $entry = JournalEntry::where('type', 'sales_receipt')->firstOrFail();
+        $this->assertSame($total, (float) $entry->details->sum('debit'));
+        $this->assertSame($total, (float) $entry->details->sum('credit'));
     }
 }

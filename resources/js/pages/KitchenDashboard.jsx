@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, CookingPot, CheckCheck, ListOrdered, ArrowRight, Table2, LayoutGrid, ChevronRight, ChevronDown, X, Send, Folder, FolderOpen, FileText } from 'lucide-react';
+import { LayoutGrid, Table2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { api } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
 import { notifyError } from '../utils/alerts';
-import { ItemStatusBadge, ITEM_STATUS } from '../components/badges';
+import { ITEM_STATUS } from '../components/badges';
 
 const STAGES = [
-    { key: 'pending', label: 'Dipesan', band: 'bg-gray-600', icon: Clock },
-    { key: 'cooking', label: 'Diproses', band: 'bg-amber-500', icon: CookingPot },
-    { key: 'sent', label: 'Dikirim', band: 'bg-blue-600', icon: Send },
-    { key: 'done', label: 'Selesai', band: 'bg-emerald-500', icon: CheckCheck },
+    { key: 'pending', label: 'Dipesan', band: 'bg-gray-600' },
+    { key: 'cooking', label: 'Dimasak', band: 'bg-amber-500' },
+    { key: 'sent', label: 'Dikirim', band: 'bg-blue-600' },
+    { key: 'done', label: 'Selesai', band: 'bg-emerald-500' },
 ];
 
 const orderStage = (order) => {
@@ -37,12 +37,57 @@ const formatTime = (value, withDate = false) => {
     return date.toLocaleTimeString('id-ID', options);
 };
 
+/**
+ * Warna tiap opsi dropdown status.
+ *
+ * Opsi <option> tidak mewarisi gaya <select> secara konsisten di semua browser,
+ * sehingga tanpa warna eksplisit isinya ikut menumpang warna select dan tidak
+ * kelihatan. Warna di sini mengikuti tahap agar daftar isi selalu terbaca.
+ */
+const STATUS_OPTION_TONE = {
+    pending: 'bg-gray-100 text-gray-800',
+    cooking: 'bg-amber-100 text-amber-900',
+    sent: 'bg-blue-100 text-blue-900',
+    done: 'bg-emerald-100 text-emerald-900',
+};
+
+/**
+ * Editor status satu menu, dipakai di mode Kanban Board maupun Tabel.
+ *
+ * Memakai <select> supaya koki bisa memindahkan tahap maju maupun mundur, dan
+ * tersedia langsung pada tiap baris menu tanpa harus membuka Detail. Warna
+ * dropdown mengikuti tahap agar mudah dibaca sekilas.
+ */
+function ItemStatusSelect({ item, onChange, className = '' }) {
+    return (
+        <span className={`relative inline-flex shrink-0 ${className}`}>
+            <select
+                value={item.status}
+                onChange={(e) => onChange(item, e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className={`status-select status-${item.status} !pr-4`}
+                title="Ubah status menu"
+            >
+                {Object.entries(ITEM_STATUS).map(([key, meta]) => (
+                    <option key={key} value={key} className={STATUS_OPTION_TONE[key]}>
+                        {meta.label}
+                    </option>
+                ))}
+            </select>
+            <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[9px] leading-none opacity-70">
+                &#9662;
+            </span>
+        </span>
+    );
+}
+
 export default function KitchenDashboard() {
     const queryClient = useQueryClient();
     const [query, setQuery] = useState('');
     const [view, setView] = useState('board');
     const [selectedId, setSelectedId] = useState(null);
     const [collapsedKeys, setCollapsedKeys] = useState({});
+    const [focusStage, setFocusStage] = useState(null);
 
     const { data: items = { waiting: [], cooking: [], sent: [], done: [] }, isLoading } = useQuery({
         queryKey: ['kitchen-items'],
@@ -97,6 +142,10 @@ export default function KitchenDashboard() {
         orders: orders.filter((o) => o.items.some((i) => i.status === stage.key)),
     }));
 
+    // Saat satu status dipilih, board menyempit hanya ke kolom status itu dan
+    // kolomnya melebar memenuhi layar.
+    const shownStages = focusStage ? boardGroups.filter((s) => s.key === focusStage) : boardGroups;
+
     const filteredOrders = useMemo(() => {
         const q = query.trim().toLowerCase();
         return q ? orders.filter((o) => o.order_number.toLowerCase().includes(q)) : orders;
@@ -128,57 +177,89 @@ export default function KitchenDashboard() {
 
     const renderItemRow = (item) => {
         return (
-            <div key={item.id} className="flex items-center justify-between gap-3 bg-surface-2 rounded-xl px-3 py-2">
-                <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm truncate">{item.product?.name}</div>
-                    <div className="text-xs text-muted flex items-center gap-1">
-                        <Clock size={11} /> {formatTime(item.created_at)}
-                    </div>
-                </div>
-
-                <span className="badge badge-accent shrink-0">
-                    <span className="text-accent font-black text-base">{item.qty}×</span>
-                </span>
-
-                <ItemStatusBadge status={item.status} />
+            <div key={item.id} className="flex items-center gap-2 bg-surface-2 px-2 py-1.5">
+                <span className="text-accent font-black text-sm shrink-0 tabular-nums">{item.qty}&times;</span>
+                <span className="flex-1 min-w-0 text-sm font-semibold truncate">{item.product?.name}</span>
+                <span className="text-[11px] text-muted tabular-nums shrink-0">{formatTime(item.created_at)}</span>
+                <ItemStatusSelect item={item} onChange={updateStatus} />
             </div>
         );
     };
 
-    const renderOrder = (order, stage) => {
-        const doneCount = order.items.filter((i) => i.status === 'done').length;
+    /**
+     * Daftar menu satu pesanan sebagai tabel mini, dipakai board yang sedang
+     * melebar.
+     *
+     * Di mode tiga kolom baris item masih enak dibaca satu per satu, tapi begitu
+     * satu status melebar menjadi satu layar menu satu pesanan jadi terpecah ke
+     * beberapa kolom dan sulit dipindai. Tabel mini yang kolomnya lurus membuat
+     * tiap pesanan terbaca sebagai satu blok utuh, dan beberapa blok bisa
+     * berdampingan supaya ruang kosong tidak terbuang.
+     */
+    const renderOrderTable = (order, stage) => {
         return (
-            <div key={order.id} className="card !p-0 overflow-hidden border border-line">
-                <div
-                    role="button"
-                    tabIndex="0"
-                    onClick={() => setSelectedId(order.id)}
-                    onKeyDown={(e) => e.key === 'Enter' && setSelectedId(order.id)}
-                    className={`w-full flex items-center justify-between px-4 py-2 ${stage.band} text-white text-xs font-bold rounded-t-2xl cursor-pointer`}
-                    title="Lihat detail pesanan"
-                >
-                    <span className="flex items-center gap-1.5">
-                        <ListOrdered size={13} /> {order.order_number}
-                    </span>
-                    <span>Meja {order.table_number ?? '-'}</span>
-                </div>
+            <table className="w-full">
+                <thead>
+                    <tr>
+                        <th className="table-head !px-2 w-12 text-center">Qty</th>
+                        <th className="table-head !px-2">Menu</th>
+                        <th className="table-head !px-2 w-28 text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                    {order.items.filter((i) => i.status === stage.key).map((item) => (
+                        <tr key={item.id} className="hover:bg-surface-2">
+                            <td className="table-cell !px-2 text-center font-black text-accent tabular-nums">{item.qty}&times;</td>
+                            <td className="table-cell !px-2 font-semibold">{item.product?.name}</td>
+                            <td className="table-cell !px-2 text-center">
+                                <ItemStatusSelect item={item} onChange={updateStatus} className="mx-auto" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    };
 
-                <div className="p-4 space-y-2">
-                    {order.items.filter((i) => i.status === stage.key).map(renderItemRow)}
-                </div>
+    /**
+     * Satu blok pesanan di papan.
+     *
+     * Baris judulnya bisa ditutup per order lewat tombol minus/plus. Pada board
+     * tiga kolom judulnya memakai warna netral dan jam pesanan, sedangkan pada
+     * board yang melebar judulnya memakai pita warna tahap dan daftar menunya
+     * diubah menjadi tabel mini supaya blok pesanan tetap terbaca utuh.
+     */
+    const renderOrder = (order, stage, wide) => {
+        const open = !collapsedKeys[order.id];
 
-                <div className="flex items-center justify-between px-4 py-2.5 border-t border-line bg-surface-2/60 rounded-b-2xl">
-                    <span className="text-xs text-muted font-semibold">
-                        {stage.label} · {doneCount}/{order.items.length} selesai
-                    </span>
+        return (
+            <div key={order.id} className={wide ? 'bg-surface border border-line break-inside-avoid mb-3' : 'py-2'}>
+                <div className={wide ? `flex items-center gap-2 px-3 py-2 text-white ${stage.band}` : 'flex items-center justify-between gap-2'}>
                     <button
                         type="button"
-                        onClick={() => setSelectedId(order.id)}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-accent hover:underline cursor-pointer"
+                        onClick={() => toggleCollapsed(order.id)}
+                        title={open ? 'Tutup pesanan ini' : 'Buka pesanan ini'}
+                        className="flex items-baseline gap-2 min-w-0 text-left cursor-pointer"
                     >
-                        Detail <ArrowRight size={12} />
+                        <span className="w-3 shrink-0 text-center font-black">{open ? '−' : '+'}</span>
+                        <span className="text-sm font-black tracking-wide">{order.order_number}</span>
+                        <span className={`text-xs truncate ${wide ? 'opacity-80' : 'text-muted'}`}>
+                            Meja {order.table_number ?? '-'}
+                        </span>
                     </button>
+                    {!wide && (
+                        <span className="text-xs text-muted tabular-nums shrink-0">{formatTime(order.created_at)}</span>
+                    )}
                 </div>
+
+                {open &&
+                    (wide ? (
+                        renderOrderTable(order, stage)
+                    ) : (
+                        <div className="mt-1 space-y-1">
+                            {order.items.filter((i) => i.status === stage.key).map(renderItemRow)}
+                        </div>
+                    ))}
             </div>
         );
     };
@@ -186,69 +267,66 @@ export default function KitchenDashboard() {
     const renderGroupedTable = () => {
         if (filteredOrders.length === 0) {
             return (
-                <div className="card text-muted text-center py-14">
+                <div className="card rounded-none text-muted text-center py-14">
                     {query.trim() ? 'Tidak ada pesanan dengan nomor tersebut.' : 'Tidak ada pesanan.'}
                 </div>
             );
         }
 
         return (
-            <div className="border border-line rounded-2xl overflow-hidden">
+            <div className="border border-line rounded-none overflow-hidden">
                 <table className="w-full">
                     <thead className="border-b border-line">
                         <tr>
                             <th className="table-head">Pesanan</th>
                             <th className="table-head text-center">Qty</th>
-                            <th className="table-head text-center">Meja</th>
-                            <th className="table-head text-center">Waktu</th>
                             <th className="table-head text-center">Status</th>
-                            <th className="table-head text-right">Aksi</th>
                         </tr>
                     </thead>
 
                     {filteredOrders.map((order) => {
                         const meta = STAGES.find((s) => s.key === orderStage(order)) ?? STAGES[0];
                         const doneCount = order.items.filter((i) => i.status === 'done').length;
-                        const totalQty = order.items.reduce((sum, i) => sum + i.qty, 0);
                         const open = !collapsedKeys[order.id];
-                        const FolderIcon = open ? FolderOpen : Folder;
 
                         return (
                             <tbody key={order.id} className="border-t border-line align-top">
+                                {/*
+                                 * Baris container tiap pesanan memuat nomor pesanan,
+                                 * nomor meja, dan progres. Jumlah sudah tampil per menu
+                                 * di bawah, dan waktu tidak relevan di layar dapur.
+                                 */}
                                 <tr
                                     className={`${meta.band} text-white cursor-pointer select-none`}
                                     onClick={() => toggleCollapsed(order.id)}
-                                    title={open ? 'Tutup folder pesanan' : 'Buka folder pesanan'}
+                                    title={open ? 'Tutup pesanan' : 'Buka pesanan'}
                                 >
-                                    <td className="px-4 py-2.5">
+                                    <td colSpan={3} className="px-4 py-2.5">
                                         <div className="flex items-center gap-2">
-                                            {open ? <ChevronDown size={15} className="shrink-0" /> : <ChevronRight size={15} className="shrink-0" />}
-                                            <FolderIcon size={15} className="shrink-0" />
-                                            <span className="font-black tracking-wide">{order.order_number}</span>
+                                            <span className="w-4 text-center font-black">{open ? '−' : '+'}</span>
+                                            {/*
+                                             * Nomor pesanan membuka detail. Tombol
+                                             * terpisah supaya tidak ikut memicu
+                                             * buka/tutup baris pesanan.
+                                             */}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedId(order.id);
+                                                }}
+                                                title="Lihat detail pesanan"
+                                                className="font-black tracking-wide underline underline-offset-2 decoration-2 cursor-pointer hover:opacity-80"
+                                            >
+                                                {order.order_number}
+                                            </button>
+                                            <span className="text-white/80 text-[11px] font-semibold whitespace-nowrap">
+                                                Meja {order.table_number ?? '-'}
+                                            </span>
                                             <span className="text-white/80 text-[11px] font-semibold">
                                                 {doneCount}/{order.items.length} selesai
                                             </span>
                                         </div>
-                                    </td>
-                                    <td className="px-4 py-2.5 text-center font-bold">{totalQty}</td>
-                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">Meja {order.table_number ?? '-'}</td>
-                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">{formatTime(order.created_at, true)}</td>
-                                    <td className="px-4 py-2.5 text-center">
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-bold">
-                                            <meta.icon size={12} /> {meta.label}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-2.5 text-right">
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedId(order.id);
-                                            }}
-                                            className="rounded-lg bg-white/20 hover:bg-white/30 px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors"
-                                        >
-                                            Detail
-                                        </button>
                                     </td>
                                 </tr>
 
@@ -256,25 +334,11 @@ export default function KitchenDashboard() {
                                     order.items.map((item) => (
                                         <tr key={item.id} className="border-t border-line hover:bg-accent-soft/30">
                                             <td className="table-cell">
-                                                <div className="flex items-center gap-2 pl-7">
-                                                    <FileText size={13} className="text-faint shrink-0" />
-                                                    <span className="font-semibold">{item.product?.name}</span>
-                                                </div>
+                                                <span className="font-semibold">{item.product?.name}</span>
                                             </td>
                                             <td className="table-cell text-center font-black text-accent">{item.qty}×</td>
-                                            <td className="table-cell text-center text-xs text-muted">-</td>
-                                            <td className="table-cell text-center text-xs text-muted whitespace-nowrap">{formatTime(item.created_at)}</td>
                                             <td className="table-cell text-center">
-                                                <ItemStatusBadge status={item.status} />
-                                            </td>
-                                            <td className="table-cell text-right">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectedId(order.id)}
-                                                    className="text-xs font-bold text-accent hover:underline cursor-pointer"
-                                                >
-                                                    Detail
-                                                </button>
+                                                <ItemStatusSelect item={item} onChange={updateStatus} className="mx-auto" />
                                             </td>
                                         </tr>
                                     ))}
@@ -299,15 +363,16 @@ export default function KitchenDashboard() {
                 onClick={() => setSelectedId(null)}
             >
                 <div
-                    className="bg-surface rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+                    className="bg-surface rounded-none w-full max-w-lg max-h-[85vh] overflow-y-auto"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className={`flex items-center justify-between px-4 py-2.5 ${meta.band} text-white text-sm font-bold`}>
-                        <span className="flex items-center gap-1.5">
-                            <ListOrdered size={14} /> {selectedOrder.order_number}
-                        </span>
-                        <button onClick={() => setSelectedId(null)} className="text-white/90 hover:text-white cursor-pointer">
-                            <X size={18} />
+                        <span>{selectedOrder.order_number}</span>
+                        <button
+                            onClick={() => setSelectedId(null)}
+                            className="text-white/90 hover:text-white cursor-pointer text-xs font-semibold"
+                        >
+                            Tutup
                         </button>
                     </div>
 
@@ -325,27 +390,11 @@ export default function KitchenDashboard() {
 
                     <div className="p-4 space-y-2">
                         {selectedOrder.items.map((item) => (
-                            <div key={item.id} className="flex items-center justify-between gap-3 bg-surface-2 rounded-xl px-3 py-2">
-                                <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-sm truncate">{item.product?.name}</div>
-                                    <div className="text-xs text-muted flex items-center gap-2">
-                                        <span className="flex items-center gap-1">
-                                            <Clock size={11} /> {formatTime(item.created_at)}
-                                        </span>
-                                        <span className="text-accent font-black">{item.qty}×</span>
-                                    </div>
-                                </div>
-
-                                <select
-                                    value={item.status}
-                                    onChange={(e) => updateStatus(item, e.target.value)}
-                                    className="input !py-2 !px-2 text-sm font-semibold shrink-0"
-                                    title="Ubah status secara manual"
-                                >
-                                    {Object.entries(ITEM_STATUS).map(([key, meta]) => (
-                                        <option key={key} value={key}>{meta.label}</option>
-                                    ))}
-                                </select>
+                            <div key={item.id} className="flex items-center gap-2 bg-surface-2 rounded-none px-2 py-1.5">
+                                <span className="text-accent font-black text-sm shrink-0 tabular-nums">{item.qty}&times;</span>
+                                <span className="flex-1 min-w-0 text-sm font-semibold truncate">{item.product?.name}</span>
+                                <span className="text-[11px] text-muted tabular-nums shrink-0">{formatTime(item.created_at)}</span>
+                                <ItemStatusSelect item={item} onChange={updateStatus} />
                             </div>
                         ))}
                     </div>
@@ -368,36 +417,67 @@ export default function KitchenDashboard() {
     return (
         <Layout header={header}>
             {isLoading ? (
-                <div className="card text-muted">Memuat SPK...</div>
+                <div className="card rounded-none text-muted">Memuat SPK...</div>
             ) : view === 'table' ? (
                 renderGroupedTable()
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                    {boardGroups.map((stage) => (
-                        <div key={stage.key} className="rounded-2xl border border-line bg-surface-2 p-3 max-h-[calc(100vh-9rem)] flex flex-col">
-                            <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${stage.band} text-white text-xs font-bold mb-3 shrink-0`}>
-                                <span className="flex items-center gap-1.5">
-                                    <stage.icon size={14} /> {stage.label}
-                                </span>
-                                <span>{stage.orders.length}</span>
+                <div className={focusStage ? '' : 'grid gap-x-4 gap-y-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-4'}>
+                    {shownStages.map((stage) => {
+                        const focused = focusStage === stage.key;
+                        return (
+                            <div key={stage.key} className="flex flex-col min-w-0 rounded-none">
+                                {/*
+                                 * Judul tahap sekaligus tombol perluasan: ditekan
+                                 * sekali, kolom ini melebar sendiri memenuhi
+                                 * layar dan hanya menampilkan order pada status
+                                 * itu. Tekan lagi untuk kembali ke 4 kolom.
+                                 */}
+                                <button
+                                    type="button"
+                                    onClick={() => setFocusStage((s) => (s === stage.key ? null : stage.key))}
+                                    title={focused ? 'Kembali ke 4 kolom' : `Perlebar ${stage.label}`}
+                                    className={`w-full rounded-none px-3 py-2 text-sm font-bold text-white text-left cursor-pointer ${stage.band} ${
+                                        focused ? 'ring-2 ring-accent ring-offset-1 ring-offset-page' : ''
+                                    }`}
+                                >
+                                    <span className="flex items-center justify-between gap-2">
+                                        <span className="truncate">{stage.label}</span>
+                                        <span className="shrink-0 tabular-nums">{stage.orders.length}</span>
+                                    </span>
+                                </button>
+
+                                {/*
+                                 * Saat statusnya diperlebar, blok pesanan disusun
+                                 * menjadi grid tabel mini agar beberapa pesanan
+                                 * bisa dibaca berdampingan, bukan menumpuk satu
+                                 * kolom panjang yang harus digulir.
+                                 *
+                                 * Susunannya pakai multi-column, bukan grid:
+                                 * grid menyamakan tinggi tiap baris sehingga
+                                 * blok yang ditutup menyisakan rongga kosong di
+                                 * bawahnya dan blok berikutnya turun ke baris
+                                 * baru. Multi-column mengalir sesuai tinggi
+                                 * sebenarnya, jadi blok yang ditutup langsung
+                                 * disusul blok di bawahnya.
+                                 */}
+                                <div
+                                    className={
+                                        focused
+                                            ? 'mt-2 columns-1 md:columns-2 xl:columns-3 gap-3 [&>*:last-child]:mb-0'
+                                            : 'mt-2 divide-y divide-line'
+                                    }
+                                >
+                                    {stage.orders.length === 0 ? (
+                                        <p className="text-xs text-muted text-center py-6">Kosong</p>
+                                    ) : (
+                                        stage.orders.map((order) => renderOrder(order, stage, focused))
+                                    )}
+                                </div>
                             </div>
-                            <div className="overflow-y-auto scrollbar-thin pr-1 -mr-1 flex-1">
-                                {stage.orders.length === 0 ? (
-                                    <p className="text-xs text-muted text-center py-8">Kosong</p>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {stage.orders.map((order) => renderOrder(order, stage))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
-
-            <div className="mt-6 flex items-center gap-2 text-muted text-sm">
-                <ArrowRight size={16} /> Klik Detail pada pesanan untuk mengubah status menu secara manual (Dipesan → Diproses → Dikirim → Selesai).
-            </div>
 
             {renderDetailModal()}
         </Layout>

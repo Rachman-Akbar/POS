@@ -33,6 +33,9 @@ export default function TopHeader({
     categories = [],
     category = '__all__',
     onCategoryChange,
+    filterAllLabel = 'Semua Kategori',
+    filterPlaceholder = 'Cari kategori...',
+    filterEmptyLabel = 'Kategori tidak ditemukan.',
     favoritesCount = 0,
     allOpen,
     onToggleAll,
@@ -90,6 +93,9 @@ export default function TopHeader({
                                 value={category}
                                 onChange={onCategoryChange}
                                 favoritesCount={favoritesCount}
+                                allLabel={filterAllLabel}
+                                searchPlaceholder={filterPlaceholder}
+                                emptyLabel={filterEmptyLabel}
                             />
                         )}
                     </div>

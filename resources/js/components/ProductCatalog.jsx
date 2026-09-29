@@ -38,7 +38,7 @@ function ProductImage({ product, className = '' }) {
     return <img src={product.image} alt={product.name} loading="lazy" onError={() => setErr(true)} className={className} />;
 }
 
-const CardItem = ({ product, onOpen, onAdd, onSelect, showStock, compact = false, active = false }) => {
+export const CardItem = ({ product, onOpen, onAdd, onSelect, showStock, compact = false, active = false }) => {
     const out = product.stock <= 0;
     const open = () => (onSelect ? onSelect(product) : !out && onOpen(product));
 

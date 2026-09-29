@@ -1,28 +1,73 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-    Banknote, CreditCard, Landmark, Printer, ReceiptText, Check, CheckCircle2,
-    Minus, Plus, Trash2, ShoppingCart, QrCode, UtensilsCrossed, ScrollText, AlertCircle,
-    Save, ChevronLeft, ChevronRight, ImageOff,
+    Printer, ReceiptText, Check,
+    Minus, Plus, ShoppingCart, UtensilsCrossed, AlertCircle,
+    Save, ChevronRight, ImageOff, ClipboardList, ChefHat,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ProductCatalog, { ALL_CATEGORIES, catalogSectionKeys } from '../components/ProductCatalog';
-import QrisQrCode from '../components/QrisQrCode';
 import CurrencyInput from '../components/CurrencyInput';
-import Price, { PriceRow } from '../components/Price';
+import { PriceRow } from '../components/Price';
 import SearchSelect from '../components/SearchSelect';
 import CashierCustomerSelect from '../components/cashier/CashierCustomerSelect';
-import { PayMethodBadge } from '../components/badges';
+import ProductLinesList, { QtyStepper, LineThumb } from '../components/cashier/ProductLinesList';
+import { PaymentDropdown, TOTAL_VALUE, TransactionCard } from '../components/cashier/PaymentParts';
+import ViewModeSwitch from '../components/ViewModeSwitch';
+import OrderDetailPage from '../components/cashier/OrderDetailPage';
+import { ItemStatusBadge } from '../components/badges';
 import { api, formatIDR, parseNumber } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
-import { notifySuccess, notifyError } from '../utils/alerts';
+import { notifySuccess, notifyError, Swal } from '../utils/alerts';
+import {
+    DRAFT_FILTER, isDraftOrder, isUnpaidOrder, orderProcessStatus,
+    receivedOf, remainingOf,
+    PAYMENT_FILTER, paymentFilterOf, matchesPaymentFilter,
+} from '../utils/order';
 
-const NAV_ICONS = { orders: UtensilsCrossed, draft: ReceiptText, history: ScrollText };
+/** Pilihan filter status pembayaran di tabel Pesanan. */
+const PAYMENT_FILTER_OPTIONS = [
+    { value: PAYMENT_FILTER.All, label: 'Semua' },
+    { value: PAYMENT_FILTER.Paid, label: 'Lunas' },
+    { value: PAYMENT_FILTER.Unpaid, label: 'Belum Lunas' },
+];
+
+const NAV_ICONS = { kasir: UtensilsCrossed, pesanan: ClipboardList, dapur: ChefHat };
+
+/**
+ * Kolom papan dapur, urut sesuai tahap ItemStatus di backend.
+ * Key mengikuti grup yang dikembalikan /kitchen/items.
+ */
+const KITCHEN_COLUMNS = [
+    { key: 'waiting', label: 'Dipesan' },
+    { key: 'cooking', label: 'Dimasak' },
+    { key: 'sent', label: 'Dikirim' },
+    { key: 'done', label: 'Selesai' },
+];
+
+/**
+ * Tahap proses untuk filter di header halaman Pesanan.
+ */
+const PROCESS_STAGE_OPTIONS = [
+    { name: 'pending', label: 'Dipesan' },
+    { name: 'cooking', label: 'Dimasak' },
+    { name: 'sent', label: 'Dikirim' },
+    { name: 'done', label: 'Selesai' },
+];
+
+/**
+ * Cocokkan order dengan pilihan filter tahap di header Pesanan.
+ */
+function matchesStageFilter(order, stage) {
+    if (stage === ALL_CATEGORIES) return true;
+
+    return orderProcessStatus(order) === stage;
+}
 
 export default function CashierDashboard() {
     const queryClient = useQueryClient();
 
-    const [tab, setTab] = useState('orders');
+    const [tab, setTab] = useState('kasir');
     const [mode, setMode] = useState('grid');
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState(ALL_CATEGORIES);
@@ -38,6 +83,11 @@ export default function CashierDashboard() {
     const [selected, setSelected] = useState({});
     const [collapsed, setCollapsed] = useState({});
     const [customer, setCustomer] = useState(null);
+    const [orderQuery, setOrderQuery] = useState('');
+    const [orderStage, setOrderStage] = useState(ALL_CATEGORIES);
+    const [paymentFilter, setPaymentFilter] = useState(PAYMENT_FILTER.All);
+    const [detailOrderId, setDetailOrderId] = useState(null);
+    const [settling, setSettling] = useState(false);
 
     const { data: products = [] } = useQuery({
         queryKey: ['products'],
@@ -49,16 +99,16 @@ export default function CashierDashboard() {
         queryFn: async () => (await api.get('/settings')).data.data,
     });
 
-    const { data: pending = [] } = useQuery({
-        queryKey: ['cashier-pending'],
-        queryFn: async () => (await api.get('/payments/pending')).data.data,
+    const { data: orders = [] } = useQuery({
+        queryKey: ['cashier-orders'],
+        queryFn: async () => (await api.get('/orders/transactions')).data.data,
         refetchInterval: 15_000,
     });
 
-    const { data: today = [] } = useQuery({
-        queryKey: ['cashier-today'],
-        queryFn: async () => (await api.get('/payments/today')).data.data,
-        refetchInterval: 15_000,
+    const { data: kitchen = {} } = useQuery({
+        queryKey: ['kitchen-items'],
+        queryFn: async () => (await api.get('/kitchen/items')).data.data,
+        refetchInterval: 10_000,
     });
 
     const flags = settings?.cashier ?? {};
@@ -70,6 +120,72 @@ export default function CashierDashboard() {
     const enableCustomer = flags.cashier_enable_customer ?? true;
     const taxRate = Number(settings?.ppn_rate ?? 11);
     const tableNumbers = settings?.table_numbers ?? Array.from({ length: 20 }, (_, i) => String(i + 1));
+
+    // Disimpan sebagai id, bukan objek, supaya modal ikut ter-update begitu
+    // order dilunasi atau draft diselesaikan dan daftar di-refetch.
+    const detailOrder = useMemo(
+        () => orders.find((order) => order.id === detailOrderId) ?? null,
+        [orders, detailOrderId],
+    );
+
+    const kitchenTotal = KITCHEN_COLUMNS.reduce(
+        (sum, column) => sum + (kitchen[column.key]?.length ?? 0),
+        0,
+    );
+
+    /**
+     * Order yang cocok dengan pencarian header, sebelum filter tahap
+     * diterapkan. Dipisah karena jumlah per tahap di dropdown filter dihitung
+     * dari daftar ini: user tetap melihat sebaran tahap yang sebenarnya dari
+     * kata kunci yang diketiknya, walau ia sedang menyaring satu tahap.
+     */
+    const searchMatchedOrders = useMemo(() => {
+        const needle = orderQuery.trim().toLowerCase();
+
+        return orders.filter((order) => {
+            if (needle === '') return true;
+
+            const customer = order.customer?.company_name || order.customer?.name || '';
+            const items = (order.items ?? []).map((item) => item.product?.name ?? '').join(' ');
+            const haystack = [
+                order.order_number,
+                order.invoice?.invoice_number,
+                order.table_number,
+                customer,
+                items,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+
+            return haystack.includes(needle);
+        });
+    }, [orders, orderQuery]);
+
+    /** Order setelah pencarian header, filter tahap proses, dan filter lunas. */
+    const stageMatchedOrders = useMemo(
+        () => searchMatchedOrders.filter((order) => matchesStageFilter(order, orderStage)),
+        [searchMatchedOrders, orderStage],
+    );
+
+    /**
+     * Jumlah order per kelompok status pembayaran, dihitung dari hasil filter
+     * tahap dan pencarian supaya angka di chip selalu yang bisa dibuka.
+     */
+    const paymentCounts = useMemo(() => {
+        const counts = new Map();
+        stageMatchedOrders.forEach((order) => {
+            const key = paymentFilterOf(order);
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        });
+
+        return counts;
+    }, [stageMatchedOrders]);
+
+    const visibleOrders = useMemo(
+        () => stageMatchedOrders.filter((order) => matchesPaymentFilter(order, paymentFilter)),
+        [stageMatchedOrders, paymentFilter],
+    );
 
     const categories = useMemo(() => {
         const counts = new Map();
@@ -109,10 +225,10 @@ export default function CashierDashboard() {
 
     useEffect(() => {
         const channel = listenToOrders({
-            onOrderCreated: () => queryClient.invalidateQueries({ queryKey: ['cashier-pending'] }),
+            onOrderCreated: () => queryClient.invalidateQueries({ queryKey: ['cashier-orders'] }),
             onPaymentProcessed: () => {
-                queryClient.invalidateQueries({ queryKey: ['cashier-pending'] });
-                queryClient.invalidateQueries({ queryKey: ['cashier-today'] });
+                queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+                queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
             },
         });
         return () => {
@@ -149,7 +265,6 @@ export default function CashierDashboard() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [total, paidTouched, cart.length]);
 
-    const totalToday = today.reduce((sum, r) => sum + Number(r.net_amount), 0);
 
     const addToCart = (product, qty = 1) => {
         setCart((prev) => {
@@ -170,6 +285,19 @@ export default function CashierDashboard() {
 
     const removeLine = (id) => setCart((prev) => prev.filter((l) => l.product_id !== id));
 
+    /**
+     * Baris keranjang dis enriching dengan produk katalog supaya kartu grid
+     * bisa memakai foto dan data stok yang sama dengan katalog.
+     */
+    const cartLines = useMemo(
+        () =>
+            cart.map((line) => ({
+                ...line,
+                product: products.find((p) => p.id === line.product_id),
+            })),
+        [cart, products],
+    );
+
     const resetCheckout = () => {
         setCart([]);
         setTable('');
@@ -181,38 +309,24 @@ export default function CashierDashboard() {
         setCustomer(null);
     };
 
-    /**
-     * The account is no longer picked at the counter: Admin decides which
-     * account of the chosen method receives the money.
-     */
-    const defaultAccountOf = (methodCode) => {
-        const method = payMethods.find((m) => m.code === methodCode) ?? payMethods[0];
-        const accounts = (method?.accounts ?? []).filter((a) => a.is_active !== false);
-        return accounts.find((a) => a.is_default) ?? accounts[0] ?? null;
-    };
-
-    const submitOrder = async (paymentType = 'pay_now') => {
-        if (paymentType === 'pay_now' ? !canSubmit : !canDraft) return;
+    const submitOrder = async () => {
+        if (!canSubmit) return;
         setSubmitting(true);
         try {
             await api.post('/orders', {
                 table_number: enableTable ? table : undefined,
-                payment_type: paymentType,
+                payment_type: 'pay_now',
                 discount: totals.discount,
                 tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
-                payment_method: paymentType === 'pay_now' ? paymentMethod : undefined,
-                paid_amount: paymentType === 'pay_now' ? paid : undefined,
+                payment_method: paymentMethod,
+                paid_amount: paid,
                 customer_id: customer?.id,
                 items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
             });
             resetCheckout();
-            notifySuccess(
-                paymentType === 'pay_now'
-                    ? 'Transaksi lunas, pesanan dikirim ke dapur.'
-                    : 'Transaksi disimpan sebagai draft (faktur gantung menunggu pelunasan).',
-            );
-            queryClient.invalidateQueries({ queryKey: ['cashier-pending'] });
-            queryClient.invalidateQueries({ queryKey: ['cashier-today'] });
+            notifySuccess('Transaksi lunas, pesanan dikirim ke dapur.');
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
             queryClient.invalidateQueries({ queryKey: ['products'] });
         } catch (err) {
             notifyError('Transaksi gagal', err.response?.data?.message ?? 'Gagal memproses transaksi.');
@@ -221,15 +335,85 @@ export default function CashierDashboard() {
         }
     };
 
-    const settle = async (invoice) => {
-        const target = payMethods.find((m) => m.code === (selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash')) ?? payMethods[0] ?? { code: 'cash' };
+    /**
+     * Simpan keranjang sebagai draft: order tersimpan yang belum diproses.
+     * Tidak membuat invoice, tidak membawah stok, dan tidak masuk dapur.
+     * Kasir melanjutkannya dari tab Pesanan lewat detail.
+     */
+    const saveDraft = async () => {
+        if (!canDraft) return;
+        setSubmitting(true);
         try {
-            await api.post(`/payments/orders/${invoice.order.id}/settle`, { payment_method: target.code });
-            notifySuccess(`Pembayaran ${invoice.invoice_number} berhasil.`);
-            queryClient.invalidateQueries({ queryKey: ['cashier-pending'] });
-            queryClient.invalidateQueries({ queryKey: ['cashier-today'] });
+            await api.post('/orders/draft', {
+                table_number: enableTable ? table : undefined,
+                discount: totals.discount,
+                tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
+                customer_id: customer?.id,
+                items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
+            });
+            resetCheckout();
+            notifySuccess('Draft disimpan. Belum diproses — lanjutkan dari tab Pesanan.');
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+        } catch (err) {
+            notifyError('Draft gagal', err.response?.data?.message ?? 'Gagal menyimpan draft.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    /**
+     * Terima pelunasan: kirim nominal yang diinput kasir. Bila nominal
+     * melebihi sisa tagihan, kelebihan dicatat sebagai kembalian dan
+     * dikembalikan ke pelanggan, bukan menambah pendapatan.
+     */
+    const settle = async (order, amount) => {
+        const target = payMethods.find((m) => m.code === (selected[order.id] ?? payMethods[0]?.code ?? 'cash')) ?? payMethods[0] ?? { code: 'cash' };
+        setSettling(true);
+        try {
+            const { data } = await api.post(`/payments/orders/${order.id}/settle`, {
+                payment_method: target.code,
+                ...(amount != null ? { amount } : {}),
+            });
+            const change = Number(data?.data?.change ?? 0);
+
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
+
+            if (change > 0) {
+                await Swal.fire({
+                    icon: 'success',
+                    title: 'Pembayaran diterima',
+                    html: `Kembalian untuk pelanggan <b>${formatIDR(change)}</b>`,
+                    confirmButtonText: 'Selesai',
+                    confirmButtonColor: '#ea580c',
+                });
+            } else {
+                notifySuccess(`Pembayaran ${order.invoice?.invoice_number ?? order.order_number} berhasil.`);
+            }
         } catch (err) {
             notifyError('Pembayaran gagal', err.response?.data?.message ?? 'Gagal memproses pembayaran.');
+        } finally {
+            setSettling(false);
+        }
+    };
+
+    /**
+     * Lanjutkan draft: menerbitkan invoice dan menarik stok, lalu pesanan masuk
+     * dapur. Tidak ada pembayaran di sini; pelunasan dilakukan terpisah dari
+     * order yang sudah jadi.
+     */
+    const finalizeDraft = async (order) => {
+        setSettling(true);
+        try {
+            await api.post(`/orders/${order.id}/finalize`);
+            notifySuccess(`Draft ${order.order_number} dilanjutkan dan dikirim ke dapur.`);
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+        } catch (err) {
+            notifyError('Draft gagal diproses', err.response?.data?.message ?? 'Gagal melanjutkan draft.');
+        } finally {
+            setSettling(false);
         }
     };
 
@@ -256,32 +440,72 @@ export default function CashierDashboard() {
         win.print();
     };
 
+    // Kolom pencarian dan filter di header mengikuti tab yang sedang aktif:
+    // di Kasir ia mencari produk, di Pesanan ia mencari nomor pesanan dan
+    // kategori produk digantikan filter tahap proses.
+    // Halaman detail pesanan adalah halaman penuh, bukan tab: kolom pencarian
+    // dan filter disembunyikan dan navigasi tetap menyorot tab Pesanan.
+    const onOrderDetail = Boolean(detailOrderId);
+    const onOrderList = tab === 'pesanan' && !onOrderDetail;
+
+    // Papan Dapur tidak punya katalog: pencarian produk dan filter kategori
+    // tidak ada gunanya di sana, begitu juga pengalih tampilan dan buka semua.
+    const onKitchenBoard = tab === 'dapur';
+    const onCatalog = !onOrderList && !onKitchenBoard && !onOrderDetail;
+    const stageCategories = useMemo(() => {
+        const counts = new Map();
+        searchMatchedOrders.forEach((order) => {
+            const status = orderProcessStatus(order);
+            counts.set(status, (counts.get(status) ?? 0) + 1);
+        });
+
+        return [
+            { name: DRAFT_FILTER, label: 'Draft', count: counts.get(DRAFT_FILTER) ?? 0 },
+            ...PROCESS_STAGE_OPTIONS.map((stage) => ({
+                name: stage.name,
+                label: stage.label,
+                count: counts.get(stage.name) ?? 0,
+            })),
+        ];
+    }, [searchMatchedOrders]);
+
     const header = {
-        navLabel: 'Pesanan',
-        showCatalog: true,
-        mode,
-        onModeChange: setMode,
-        allOpen: allSectionsOpen,
-        onToggleAll: toggleAllSections,
-        query,
-        onQueryChange: setQuery,
-        categories,
-        category,
-        onCategoryChange: setCategory,
-        favoritesCount: products.filter((product) => product.is_favorite).length,
+        navLabel: onOrderDetail ? 'Detail Pesanan' : 'Pesanan',
+        showCatalog: !onKitchenBoard && !onOrderDetail,
+        mode: onCatalog ? mode : undefined,
+        onModeChange: onCatalog ? setMode : undefined,
+        allOpen: onCatalog ? allSectionsOpen : undefined,
+        onToggleAll: onCatalog ? toggleAllSections : undefined,
+        query: onOrderList ? orderQuery : query,
+        onQueryChange: onOrderList ? setOrderQuery : onCatalog ? setQuery : undefined,
+        searchPlaceholder: onOrderList
+            ? 'Cari no pesanan, faktur, meja, atau pelanggan...'
+            : 'Cari produk...',
+        categories: onOrderList ? stageCategories : categories,
+        category: onOrderList ? orderStage : category,
+        onCategoryChange: onOrderList ? setOrderStage : setCategory,
+        filterAllLabel: onOrderList ? 'Semua Tahap' : 'Semua Kategori',
+        filterPlaceholder: onOrderList ? 'Cari tahap proses...' : 'Cari kategori...',
+        filterEmptyLabel: onOrderList ? 'Tahap tidak ditemukan.' : 'Kategori tidak ditemukan.',
+        favoritesCount: onOrderList
+            ? 0
+            : products.filter((product) => product.is_favorite).length,
         navItems: [
-            { key: 'orders', label: 'Pesanan', icon: NAV_ICONS.orders },
-            { key: 'draft', label: 'Draft', icon: NAV_ICONS.draft, count: pending.length },
-            { key: 'history', label: 'Riwayat', icon: NAV_ICONS.history },
+            { key: 'kasir', label: 'Kasir', icon: NAV_ICONS.kasir },
+            { key: 'pesanan', label: 'Pesanan', icon: NAV_ICONS.pesanan },
+            { key: 'dapur', label: 'Dapur', icon: NAV_ICONS.dapur },
         ],
-        activeNav: tab === 'cart' ? 'orders' : tab,
-        onNavChange: setTab,
+        activeNav: onOrderDetail ? 'pesanan' : tab === 'cart' ? 'kasir' : tab,
+        onNavChange: (next) => {
+            setDetailOrderId(null);
+            setTab(next);
+        },
     };
 
     const checkoutSidebar = (
         <CheckoutPanel
             cart={cart}
-            products={products}
+            cartLines={cartLines}
             updateQty={updateQty}
             removeLine={removeLine}
             table={table}
@@ -301,7 +525,6 @@ export default function CashierDashboard() {
             paymentMethod={paymentMethod}
             onPaymentMethodChange={setPaymentMethod}
             payMethods={payMethods}
-            defaultAccount={defaultAccountOf(paymentMethod)}
             qrisId={settings?.qris_id}
             totals={totals}
             paidRaw={paidRaw}
@@ -317,67 +540,97 @@ export default function CashierDashboard() {
             canDraft={canDraft}
             submitting={submitting}
             onClear={resetCheckout}
-            onSubmit={() => submitOrder('pay_now')}
-            onSaveDraft={() => submitOrder('pay_later')}
+            onSubmit={submitOrder}
+            onSaveDraft={saveDraft}
             onViewChange={setTab}
+        />
+    );
+
+    const detailPage = (
+        <OrderDetailPage
+            order={detailOrder}
+            view={mode}
+            onViewChange={setMode}
+            payMethods={payMethods}
+            method={
+                detailOrder
+                    ? (selected[detailOrder.id] ?? payMethods[0]?.code ?? 'cash')
+                    : (payMethods[0]?.code ?? 'cash')
+            }
+            onMethodChange={(code) =>
+                setSelected((prev) => ({
+                    ...prev,
+                    [detailOrder?.id]: code,
+                }))
+            }
+            qrisId={settings?.qris_id ?? null}
+            onSettle={(amount) => detailOrder && settle(detailOrder, amount)}
+            onFinalize={() => detailOrder && finalizeDraft(detailOrder)}
+            onPrint={() => detailOrder && printReceipt(detailOrder)}
+            onClose={() => setDetailOrderId(null)}
+            busy={settling}
         />
     );
 
     return (
         <Layout header={header}>
-            {tab === 'orders' && (
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <div className="xl:col-span-2">
-                        <ProductCatalog
-                            products={products}
-                            onAdd={addToCart}
-                            mode={mode}
-                            onModeChange={setMode}
-                            query={query}
-                            onQueryChange={setQuery}
-                            categories={categories}
-                            category={category}
-                            onCategoryChange={setCategory}
-                            showStock={showStock}
-                            showFavorites={showFavorites}
-                            hideToolbar
-                            collapsed={collapsed}
-                            onCollapsedChange={setCollapsed}
-                        />
-                    </div>
+            {onOrderDetail ? (
+                detailPage
+            ) : (
+                <>
+                    {tab === 'kasir' && (
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                            <div className="xl:col-span-2">
+                                <ProductCatalog
+                                    products={products}
+                                    onAdd={addToCart}
+                                    mode={mode}
+                                    onModeChange={setMode}
+                                    query={query}
+                                    onQueryChange={setQuery}
+                                    categories={categories}
+                                    category={category}
+                                    onCategoryChange={setCategory}
+                                    showStock={showStock}
+                                    showFavorites={showFavorites}
+                                    hideToolbar
+                                    collapsed={collapsed}
+                                    onCollapsedChange={setCollapsed}
+                                />
+                            </div>
 
-                    {checkoutSidebar}
-                </div>
-            )}
+                            {checkoutSidebar}
+                        </div>
+                    )}
 
-            {tab === 'cart' && (
+                    {tab === 'cart' && (
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                     <div className="xl:col-span-2">
                         <div className="card">
-                            <div className="flex items-center justify-between pb-3 mb-4">
-                                <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
-                                    <ShoppingCart size={16} /> Cek Pesanan
-                                </h3>
-                                <span className="badge badge-pending">{cart.length} item</span>
+                            <div className="flex items-center justify-between gap-3 pb-3 mb-4">
+                                <div>
+                                    <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
+                                        <ShoppingCart size={16} /> Cek Pesanan
+                                    </h3>
+                                    <p className="text-[11px] text-muted mt-0.5">
+                                        Keranjang aktif, belum disimpan sebagai pesanan.
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="badge badge-pending">{cart.length} item</span>
+                                    <ViewModeSwitch value={mode} onChange={setMode} />
+                                </div>
                             </div>
 
                             {cart.length === 0 ? (
-                                <p className="text-muted text-sm text-center py-10">Keranjang kosong. Tambahkan produk dari halaman Pesanan.</p>
+                                <p className="text-muted text-sm text-center py-10">Keranjang kosong. Tambahkan produk dari halaman Kasir.</p>
                             ) : (
-                                <>
-                                    <CartList
-                                        view={mode}
-                                        cart={cart}
-                                        products={products}
-                                        updateQty={updateQty}
-                                        removeLine={removeLine}
-                                    />
-                                    <div className="flex justify-end mt-4">
-                                        <button className="btn btn-ghost" onClick={() => setTab('orders')}>
-                                            <ChevronLeft size={15} /> Kembali ke Pesanan
-                                        </button>
-                                    </div>
-                                </>
+                                <ProductLinesList
+                                    view={mode}
+                                    lines={cartLines}
+                                    updateQty={updateQty}
+                                    removeLine={removeLine}
+                                />
                             )}
                         </div>
                     </div>
@@ -386,77 +639,150 @@ export default function CashierDashboard() {
                 </div>
             )}
 
-            {tab === 'draft' && (
+            {tab === 'pesanan' && (
                 <div className="card">
-                    <div className="flex items-center justify-between gap-2 pb-3 mb-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4">
                         <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
-                            <ReceiptText size={16} /> Draft
+                            <ClipboardList size={16} /> Pesanan
                         </h3>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/*
+                             * Filter status pembayaran. Berdampingan dengan filter
+                             * tahap di header karena keduanya menyaring baris yang
+                             * sama: tahap melihat sisi dapur, ini sisi kas.
+                             */}
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-muted">Status Bayar</span>
+                                {PAYMENT_FILTER_OPTIONS.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setPaymentFilter(option.value)}
+                                        title={`Filter ${option.label}`}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                            paymentFilter === option.value
+                                                ? 'bg-accent text-on-accent'
+                                                : 'bg-surface-2 text-muted hover:bg-surface-3'
+                                        }`}
+                                    >
+                                        {option.label}
+                                        <span className="ml-1 tabular-nums opacity-70">
+                                            {option.value === PAYMENT_FILTER.All
+                                                ? stageMatchedOrders.length
+                                                : (paymentCounts.get(option.value) ?? 0)}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            <span className="text-xs text-muted">
+                                {visibleOrders.length} dari {orders.length} transaksi
+                            </span>
+                        </div>
                     </div>
 
-                    {pending.length === 0 ? (
-                        <div className="card text-muted text-center py-10">Tidak ada draft menunggu pelunasan.</div>
+                    {visibleOrders.length === 0 ? (
+                        <div className="text-muted text-center py-10">
+                            {orders.length === 0
+                                ? 'Belum ada transaksi.'
+                                : 'Tidak ada pesanan yang cocok dengan pencarian atau filter.'}
+                        </div>
                     ) : (
-                        <div className="border border-line rounded-xl overflow-hidden bg-surface">
+                        <div className="border border-line rounded-xl overflow-x-auto bg-surface">
                             <table className="w-full">
                                 <thead className="border-b border-line">
                                     <tr>
-                                        <th className="table-head">Faktur</th>
+                                        <th className="table-head">No Pesanan</th>
                                         <th className="table-head">Pesanan</th>
-                                        <th className="table-head text-right">Total</th>
-                                        <th className="table-head text-right">Terbayar</th>
-                                        <th className="table-head text-right">Sisa</th>
-                                        <th className="table-head text-center">Status</th>
+                                        <th className="table-head text-right">Bayar</th>
+                                        <th className="table-head text-right">Lunas</th>
+                                        <th className="table-head text-center">Proses</th>
                                         <th className="table-head text-right">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-line">
-                                    {pending.map((invoice) => {
-                                        const received = (invoice.receipts ?? []).reduce((sum, r) => sum + Number(r.gross_amount), 0);
-                                        const remaining = Number(invoice.total_amount) - received;
-                                        const method = selected[invoice.order.id] ?? payMethods[0]?.code ?? 'cash';
-                                        const account = defaultAccountOf(method);
+                                    {visibleOrders.map((order) => {
+                                        const draft = isDraftOrder(order);
+                                        const received = receivedOf(order);
+                                        const remaining = remainingOf(order);
+                                        const unpaid = isUnpaidOrder(order);
+                                        const customer = order.customer?.company_name || order.customer?.name;
+
                                         return (
-                                            <tr key={invoice.id}>
+                                            <tr
+                                                key={order.id}
+                                                onClick={() => setDetailOrderId(order.id)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === 'Enter' || event.key === ' ') {
+                                                        event.preventDefault();
+                                                        setDetailOrderId(order.id);
+                                                    }
+                                                }}
+                                                tabIndex={0}
+                                                role="button"
+                                                aria-label={`Detail pesanan ${order.order_number ?? ''}`}
+                                                className="cursor-pointer hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
+                                                title="Klik untuk melihat detail"
+                                            >
                                                 <td className="table-cell">
-                                                    <div className="font-semibold text-xs">{invoice.invoice_number}</div>
-                                                    <div className="text-xs text-muted">{invoice.order?.order_number}</div>
-                                                </td>
-                                                <td className="table-cell">
-                                                    <div className="text-xs text-muted">Meja {invoice.order?.table_number ?? '-'}</div>
-                                                    <div className="text-xs text-muted max-w-[16rem] truncate">
-                                                        {invoice.order?.items?.map((i) => `${i.qty}× ${i.product?.name}`).join(', ')}
+                                                    <div className="font-semibold text-xs">
+                                                        {order.order_number ?? '-'}
+                                                    </div>
+                                                    <div className="text-xs text-muted">
+                                                        {draft
+                                                            ? 'Belum diproses · tanpa faktur'
+                                                            : order.invoice?.invoice_number ?? '-'}
+                                                    </div>
+                                                    <div className="text-[11px] text-muted">
+                                                        Meja {order.table_number ?? '-'}
+                                                        {customer ? ` · ${customer}` : ''}
                                                     </div>
                                                 </td>
-                                                <td className="table-cell text-right font-semibold whitespace-nowrap">{formatIDR(invoice.total_amount)}</td>
-                                                <td className="table-cell text-right text-positive whitespace-nowrap">{formatIDR(received)}</td>
-                                                <td className="table-cell text-right font-bold text-accent whitespace-nowrap">{formatIDR(remaining)}</td>
+                                                <td className="table-cell">
+                                                    <div className="text-xs max-w-[18rem] truncate">
+                                                        {(order.items ?? [])
+                                                            .map((item) => `${item.qty}\u00d7 ${item.product?.name}`)
+                                                            .join(', ') || '-'}
+                                                    </div>
+                                                    <div className="text-[11px] text-muted font-semibold">
+                                                        {formatIDR(order.total_amount)}
+                                                    </div>
+                                                </td>
+                                                <td className="table-cell text-right text-positive whitespace-nowrap">
+                                                    {formatIDR(received)}
+                                                </td>
+                                                <td className="table-cell text-right whitespace-nowrap">
+                                                    {draft ? (
+                                                        <span className="badge badge-unpaid">Belum Bayar</span>
+                                                    ) : unpaid ? (
+                                                        <span className="font-bold text-accent">
+                                                            {formatIDR(remaining)}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="badge badge-paid">Lunas</span>
+                                                    )}
+                                                </td>
                                                 <td className="table-cell text-center">
-                                                    <span className={`badge ${received > 0 ? 'badge-cooking' : 'badge-unpaid'}`}>
-                                                        {received > 0 ? 'Bayar Sebagian' : 'Belum Bayar'}
-                                                    </span>
+                                                    {draft ? (
+                                                        <span className="badge badge-unpaid">Draft</span>
+                                                    ) : (
+                                                        <ItemStatusBadge status={orderProcessStatus(order)} />
+                                                    )}
                                                 </td>
-                                                <td className="table-cell">
-                                                    <div className="flex items-center justify-end gap-2">
-                                                        <select
-                                                            value={method}
-                                                            onChange={(e) => setSelected((s) => ({ ...s, [invoice.order.id]: e.target.value }))}
-                                                            className="select !w-auto !py-1.5 text-xs"
-                                                            title="Metode pembayaran"
+                                                <td className="table-cell text-right">
+                                                    {!draft && (
+                                                        <button
+                                                            className="btn btn-ghost !px-2 !py-1.5"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                printReceipt(order);
+                                                            }}
+                                                            title="Cetak Struk"
                                                         >
-                                                            {payMethods.map((m) => (
-                                                                <option key={m.code} value={m.code}>{m.name}</option>
-                                                            ))}
-                                                        </select>
-                                                        {account && (
-                                                            <span className="text-[11px] text-muted text-right max-w-[10rem] truncate" title="Rekening tujuan diatur di Admin">
-                                                                {account.bank_name ? `${account.bank_name} — ${account.name}` : account.name}
-                                                            </span>
-                                                        )}
-                                                        <button onClick={() => settle(invoice)} className="btn btn-success !py-1.5 whitespace-nowrap">
-                                                            <CheckCircle2 size={14} /> Terima
+                                                            <Printer size={14} />
                                                         </button>
-                                                    </div>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -468,242 +794,62 @@ export default function CashierDashboard() {
                 </div>
             )}
 
-            {tab === 'history' && (
+            {tab === 'dapur' && (
                 <div className="card">
                     <div className="flex items-center justify-between gap-2 pb-3 mb-4">
                         <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
-                            <ScrollText size={16} /> Riwayat
+                            <ChefHat size={16} /> Dapur
                         </h3>
+                        <span className="text-xs text-muted">Diubah oleh koki di halaman Dapur</span>
                     </div>
 
-                    {today.length === 0 ? (
-                        <div className="card text-muted text-center py-10">Belum ada transaksi hari ini.</div>
+                    {kitchenTotal === 0 ? (
+                        <div className="text-muted text-center py-10">Tidak ada pesanan menunggu dapur.</div>
                     ) : (
-                        <div className="border border-line rounded-xl overflow-hidden bg-surface">
-                            <table className="w-full">
-                                <thead className="border-b border-line">
-                                    <tr>
-                                        <th className="table-head">Faktur</th>
-                                        <th className="table-head">Metode</th>
-                                        <th className="table-head text-right">Diterima</th>
-                                        <th className="table-head"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-line">
-                                    {today.map((receipt) => (
-                                        <tr key={receipt.id}>
-                                            <td className="table-cell">
-                                                <div className="font-semibold text-xs">{receipt.invoice?.invoice_number}</div>
-                                                <div className="text-xs text-muted">{receipt.invoice?.order?.order_number}</div>
-                                            </td>
-                                            <td className="table-cell"><PayMethodBadge method={receipt.payment_method} /></td>
-                                            <td className="table-cell font-semibold text-right">{formatIDR(receipt.net_amount)}</td>
-                                            <td className="table-cell">
-                                                <button className="btn btn-ghost !px-2 !py-1.5" onClick={() => printReceipt(receipt.invoice?.order)} title="Cetak Struk">
-                                                    <Printer size={14} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                                <tfoot className="bg-surface-3 border-t border-line">
-                                    <tr>
-                                        <td className="table-cell font-bold" colSpan={2}>Total Net (Kasir)</td>
-                                        <td className="table-cell font-bold text-right text-positive">{formatIDR(totalToday)}</td>
-                                        <td className="table-cell"></td>
-                                    </tr>
-                                </tfoot>
-                            </table>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+                            {KITCHEN_COLUMNS.map((column) => {
+                                const list = kitchen[column.key] ?? [];
+
+                                return (
+                                    <div key={column.key} className="rounded-xl border border-line bg-surface-2 p-2">
+                                        <div className="flex items-center justify-between px-2 py-1.5 mb-2">
+                                            <span className="text-xs font-bold uppercase tracking-wide">
+                                                {column.label}
+                                            </span>
+                                            <span className="badge badge-pending !px-1.5 !py-0 !text-[10px]">
+                                                {list.length}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            {list.length === 0 ? (
+                                                <p className="text-[11px] text-muted text-center py-2">&#8212;</p>
+                                            ) : (
+                                                list.map((item) => (
+                                                    <div key={item.id} className="rounded-lg bg-surface p-2">
+                                                        <div className="text-xs font-semibold truncate">
+                                                            {item.qty}\u00d7 {item.product?.name}
+                                                        </div>
+                                                        <div className="text-[11px] text-muted truncate">
+                                                            Meja {item.order?.table_number ?? '-'} \u00b7{' '}
+                                                            {item.order?.order_number ?? '-'}
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
+            )}
+                </>
             )}
         </Layout>
     );
 }
 
-function QtyStepper({ qty, onChange, size = 'sm' }) {
-    const box = size === 'sm' ? 'w-7 h-7' : 'w-9 h-9';
-    return (
-        <div className="inline-flex items-center gap-1">
-            <button onClick={() => onChange(-1)} className={`btn-icon ${box} bg-surface-2`} title="Kurangi">
-                <Minus size={14} />
-            </button>
-            <span className={`${size === 'sm' ? 'w-6 text-sm' : 'w-10 text-lg'} text-center font-bold`}>{qty}</span>
-            <button onClick={() => onChange(1)} className={`btn-icon ${box} bg-accent-soft text-accent-ink hover:bg-accent hover:text-on-accent`} title="Tambah">
-                <Plus size={14} />
-            </button>
-        </div>
-    );
-}
-
-function LineThumb({ product }) {
-    if (!product?.image) {
-        return (
-            <div className="w-10 h-10 rounded-lg bg-surface-2 flex items-center justify-center shrink-0">
-                <ImageOff size={16} className="text-faint" />
-            </div>
-        );
-    }
-    return <img src={product.image} alt={product.name} loading="lazy" className="w-10 h-10 rounded-lg object-cover shrink-0" />;
-}
-
-/**
- * Cart lines rendered with the layout that matches the active view mode.
- */
-function CartList({ view, cart, products = [], updateQty, removeLine }) {
-    const productOf = (id) => products.find((p) => p.id === id);
-
-    if (view === 'table') {
-        return (
-            <div className="border border-line rounded-xl overflow-hidden bg-surface">
-                <table className="w-full">
-                    <thead className="border-b border-line">
-                        <tr>
-                            <th className="table-head">Produk</th>
-                            <th className="table-head text-right">Harga</th>
-                            <th className="table-head text-center">Qty</th>
-                            <th className="table-head text-right">Subtotal</th>
-                            <th className="table-head text-center w-14"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line">
-                        {cart.map((line) => (
-                            <tr key={line.product_id}>
-                                <td className="table-cell font-semibold">{line.name}</td>
-                                <td className="table-cell text-right">{formatIDR(line.price)}</td>
-                                <td className="table-cell text-center">
-                                    <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} />
-                                </td>
-                                <td className="table-cell text-right font-semibold text-accent">{formatIDR(line.price * line.qty)}</td>
-                                <td className="table-cell text-center">
-                                    <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1" title="Hapus item">
-                                        <Trash2 size={15} />
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    }
-
-    if (view === 'hero') {
-        return <CartHero cart={cart} products={products} updateQty={updateQty} removeLine={removeLine} />;
-    }
-
-    return (
-        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
-            {cart.map((line) => (
-                <div key={line.product_id} className="bg-surface-2 rounded-xl p-3 flex items-center gap-3">
-                    <LineThumb product={productOf(line.product_id)} />
-                    <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm truncate">{line.name}</div>
-                        <div className="text-xs text-muted">
-                            {formatIDR(line.price)} · <span className="text-accent font-semibold">{formatIDR(line.price * line.qty)}</span>
-                        </div>
-                    </div>
-                    <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} />
-                    <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1" title="Hapus item">
-                        <Trash2 size={15} />
-                    </button>
-                </div>
-            ))}
-        </div>
-    );
-}
-
-function CartHero({ cart, products, updateQty, removeLine }) {
-    const [active, setActive] = useState(0);
-    const index = Math.min(active, cart.length - 1);
-    const line = cart[index];
-    const product = products.find((p) => p.id === line?.product_id);
-
-    if (!line) return null;
-
-    const go = (delta) => setActive((a) => Math.min(cart.length - 1, Math.max(0, a + delta)));
-
-    return (
-        <div className="rounded-xl overflow-hidden" style={{ height: 'calc(100dvh - 15rem)' }}>
-            <div className="relative h-full flex flex-col">
-                {product?.image ? (
-                    <img src={product.image} alt={line.name} className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                    <div className="absolute inset-0 bg-surface-2" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-
-                {cart.length > 1 && (
-                    <>
-                        <button
-                            onClick={() => go(-1)}
-                            disabled={index === 0}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 text-gray-700 flex items-center justify-center hover:bg-white disabled:opacity-40"
-                        >
-                            <ChevronLeft size={18} />
-                        </button>
-                        <button
-                            onClick={() => go(1)}
-                            disabled={index === cart.length - 1}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 text-gray-700 flex items-center justify-center hover:bg-white disabled:opacity-40"
-                        >
-                            <ChevronRight size={18} />
-                        </button>
-                    </>
-                )}
-
-                <div className="relative mt-auto p-5 text-white flex flex-wrap items-end justify-between gap-4">
-                    <div className="min-w-0">
-                        <div className="text-[11px] uppercase tracking-wide text-white/70">
-                            Item {index + 1} dari {cart.length}
-                        </div>
-                        <div className="text-xl font-bold leading-snug">{line.name}</div>
-                        <div className="text-sm text-white/80 mt-0.5">{formatIDR(line.price)} / item</div>
-                        <div className="text-2xl font-bold text-accent mt-1">{formatIDR(line.price * line.qty)}</div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} size="lg" />
-                        <button
-                            onClick={() => removeLine(line.product_id)}
-                            className="w-9 h-9 rounded-lg bg-white/15 text-white flex items-center justify-center hover:bg-white/25"
-                            title="Hapus item"
-                        >
-                            <Trash2 size={16} />
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function MethodChip({ method, active, onClick }) {
-    const Icons = { kas: Banknote, bank: Landmark, qris: QrCode };
-    const Icon = Icons[method.type] ?? Icons[method.code] ?? CreditCard;
-    return (
-        <button
-            onClick={onClick}
-            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                active ? 'bg-accent text-on-accent' : 'bg-surface-3 text-muted hover:bg-surface-3/70'
-            }`}
-        >
-            <Icon size={14} /> {method.name}
-        </button>
-    );
-}
-
-function AccountHint({ account }) {
-    if (!account) return null;
-    const Icon = account.type === 'bank' ? Landmark : Banknote;
-    return (
-        <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1">
-            <Icon size={11} />
-            Masuk ke akun: {account.bank_name ? `${account.bank_name} — ${account.name}` : account.name}
-        </p>
-    );
-}
 
 function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, setDiscountRaw }) {
     const [editing, setEditing] = useState(false);
@@ -721,7 +867,7 @@ function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, se
             >
                 <PriceRow
                     value={totals.discount}
-                    className="text-sm"
+                    className={TOTAL_VALUE}
                     amountClassName="font-semibold text-negative"
                 />
             </button>
@@ -756,7 +902,7 @@ function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, se
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted">%</span>
                 </div>
             ) : (
-                <div className="w-32">
+                <div className={TOTAL_VALUE}>
                     <CurrencyInput value={discountRaw} onChange={setDiscountRaw} placeholder="0" />
                 </div>
             )}
@@ -775,7 +921,7 @@ function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, se
 }
 
 /**
- * Tombol "Cek Pesanan" di sebelah kanan label Rincian Pesanan.
+ * Tombol cek pesanan di sebelah kanan label Rincian Pesanan.
  *
  * Navigasi ke Draft dan Riwayat sudah pindah ke dropdown header, jadi tombol
  * ini hanya punya satu fungsi: membuka tampilan penuh keranjang.
@@ -785,24 +931,27 @@ function CheckOrdersButton({ onClick, itemCount = 0 }) {
         <button
             type="button"
             onClick={onClick}
-            className="btn btn-ghost !text-[11px] !px-2 !py-1 flex items-center gap-1.5 cursor-pointer shrink-0"
-            title="Buka tampilan penuh keranjang"
+            className="btn btn-ghost !px-2 !py-1 flex items-center gap-1 cursor-pointer shrink-0 relative"
+            title={`Cek Pesanan (${itemCount} item)`}
+            aria-label={`Cek Pesanan, ${itemCount} item`}
         >
-            <ShoppingCart size={13} /> Cek Pesanan
+            <ShoppingCart size={14} />
             {itemCount > 0 && (
-                <span className="badge badge-pending !px-1.5 !py-0 !text-[10px]">{itemCount}</span>
+                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-accent text-on-accent text-[9px] font-bold flex items-center justify-center">
+                    {itemCount}
+                </span>
             )}
         </button>
     );
 }
 
 function CheckoutPanel({
-    cart, products = [], updateQty, removeLine,
+    cart, cartLines, updateQty, removeLine,
     table, setTable, enableTable, tableNumbers,
     enableCustomer, customer, onCustomerChange,
     discountType, setDiscountType, discountRaw, setDiscountRaw,
     enablePpn, taxRate, enablePrepay,
-    paymentMethod, onPaymentMethodChange, payMethods, defaultAccount, qrisId,
+    paymentMethod, onPaymentMethodChange, payMethods, qrisId,
     totals, paidRaw, onPaidChange, paid, change,
     payOpen, onPayToggle, canSubmit, canDraft, submitting, onSubmit, onSaveDraft, onClear,
     onViewChange,
@@ -823,24 +972,17 @@ function CheckoutPanel({
         }
     }
 
-    const productOf = (id) => products.find((p) => p.id === id);
-
     return (
-        <div className="card sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin">
-            <div className="flex items-center justify-between pb-3">
-                <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
-                    <ShoppingCart size={16} /> Transaksi
-                </h3>
-                <button
-                    onClick={onClear}
-                    disabled={empty}
-                    className="text-xs font-bold text-negative underline underline-offset-2 decoration-2 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:no-underline disabled:text-muted disabled:cursor-not-allowed"
-                    title="Kosongkan transaksi"
-                >
-                    Clear
-                </button>
-            </div>
-
+        <TransactionCard title="Transaksi" icon={ShoppingCart} actions={
+            <button
+                onClick={onClear}
+                disabled={empty}
+                className="text-xs font-bold text-negative underline underline-offset-2 decoration-2 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:no-underline disabled:text-muted disabled:cursor-not-allowed"
+                title="Kosongkan transaksi"
+            >
+                Clear
+            </button>
+        }>
             {empty ? null : (
                 <>
                     <div className="mt-3 space-y-3 pr-0.5">
@@ -873,19 +1015,21 @@ function CheckoutPanel({
                             />
                         </div>
                         <div className="space-y-2">
-                            {cart.map((line) => (
+                            {cartLines.map((line) => (
                                 <div key={line.product_id} className="flex items-center gap-2 bg-surface-2 rounded-xl p-2">
-                                    <LineThumb product={productOf(line.product_id)} />
+                                    <LineThumb product={line.product} />
                                     <div className="flex-1 min-w-0">
                                         <div className="text-sm font-semibold truncate">{line.name}</div>
-                                        <div className="text-[11px] text-muted">
-                                            {formatIDR(line.price)} · <span className="text-accent font-semibold">{formatIDR(line.price * line.qty)}</span>
+                                        <div className="text-[11px] text-muted tabular-nums">
+                                            {formatIDR(line.price)} &times; {line.qty}
                                         </div>
                                     </div>
+                                    <PriceRow
+                                        value={line.price * line.qty}
+                                        className="shrink-0"
+                                        amountClassName="text-accent font-semibold"
+                                    />
                                     <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} />
-                                    <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1" title="Hapus item">
-                                        <Trash2 size={14} />
-                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -895,7 +1039,11 @@ function CheckoutPanel({
                         <div className="space-y-1.5">
                             <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm text-muted">Subtotal</span>
-                                <PriceRow value={totals.subtotal} className="text-sm" amountClassName="font-semibold" />
+                                <PriceRow
+                                    value={totals.subtotal}
+                                    className={TOTAL_VALUE}
+                                    amountClassName="font-semibold"
+                                />
                             </div>
 
                             <div className="flex items-center justify-between gap-3">
@@ -912,7 +1060,11 @@ function CheckoutPanel({
                             {enablePpn && (
                                 <div className="flex items-center justify-between gap-3">
                                     <span className="text-sm text-muted">PPN {taxRate}%</span>
-                                    <PriceRow value={totals.tax} className="text-sm" amountClassName="font-semibold" />
+                                    <PriceRow
+                                        value={totals.tax}
+                                        className={TOTAL_VALUE}
+                                        amountClassName="font-semibold"
+                                    />
                                 </div>
                             )}
                         </div>
@@ -921,59 +1073,28 @@ function CheckoutPanel({
                             <span className="text-sm font-bold">Grand Total</span>
                             <PriceRow
                                 value={totalAmount}
-                                className="text-xl"
+                                className={`${TOTAL_VALUE} text-xl`}
                                 symbolClassName="font-bold"
                                 amountClassName="font-bold"
                             />
                         </div>
 
-                        <button
-                            type="button"
-                            onClick={onPayToggle}
-                            aria-expanded={payOpen}
-                            className="w-full flex items-center justify-between gap-2 cursor-pointer group mt-2 px-3 py-2.5 rounded-lg bg-surface-2 hover:bg-surface-3 transition-colors"
-                            title="Isi pembayaran"
-                        >
-                            <span className="flex items-center gap-1.5 text-sm font-bold">
-                                Bayar
-                                {status && !payOpen && <span className={`badge ${status.cls}`}>{status.text}</span>}
-                            </span>
-                            <Price value={totalAmount} className="text-sm font-semibold" />
-                        </button>
-
-                        {payOpen && (
-                            <div className="mt-3 space-y-3">                                <div>
-                                    <span className="label">Metode</span>
-                                    <div className="flex flex-wrap gap-2">
-                                        {payMethods.map((m) => (
-                                            <MethodChip key={m.code} method={m} active={paymentMethod === m.code} onClick={() => onPaymentMethodChange(m.code)} />
-                                        ))}
-                                    </div>
-                                    <AccountHint account={defaultAccount} />
-                                </div>
-
-                                {paymentMethod === 'qris' && qrisId && (
-                                    <div className="bg-accent-soft rounded-lg p-3">
-                                        <div className="flex items-center gap-2 mb-2 text-accent-ink font-bold text-sm">
-                                            <QrCode size={15} /> QRIS — Scan untuk Bayar
-                                        </div>
-                                        <QrisQrCode value={qrisId} />
-                                        <div className="text-[11px] text-muted mt-2 text-center">{qrisId}</div>
-                                    </div>
-                                )}
-
-                                <div className="flex items-center gap-3">
-                                    <span className="label w-24 shrink-0 !mb-0">Nominal</span>
-                                    <div className="flex-1 flex items-center gap-2">
-                                        <div className="flex-1 min-w-0">
-                                            <CurrencyInput value={paidRaw} onChange={onPaidChange} />
-                                        </div>
-                                        {status && <span className={`badge shrink-0 ${status.cls}`}>{status.text}</span>}
-                                    </div>
-                                </div>
-
-                                {change > 0 && <p className="text-[11px] text-muted text-right">Kembalian {formatIDR(change)}</p>}
-                                {paid > 0 && paid < totalAmount && (
+                        <PaymentDropdown
+                            open={payOpen}
+                            onToggle={onPayToggle}
+                            methods={payMethods}
+                            method={paymentMethod}
+                            onMethodChange={onPaymentMethodChange}
+                            qrisId={paymentMethod === 'qris' ? qrisId : null}
+                            amount={{
+                                raw: paidRaw,
+                                onChange: onPaidChange,
+                                placeholder: String(Math.round(totalAmount)),
+                            }}
+                            status={status}
+                            change={change}
+                            hint={
+                                paid > 0 && paid < totalAmount ? (
                                     <p className="text-[11px] text-right">
                                         {enablePrepay ? (
                                             <span className="text-muted">Bayar sebagian diperbolehkan — status Belum Lunas.</span>
@@ -981,42 +1102,31 @@ function CheckoutPanel({
                                             <span className="text-negative">Nominal harus melebihi total tagihan.</span>
                                         )}
                                     </p>
-                                )}
-                            </div>
-                        )}
+                                ) : null
+                            }
+                        />
 
-                        {payOpen ? (
-                            <div className="flex items-center gap-2 mt-3">
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary flex-1 justify-center"
-                                    disabled={!canDraft || submitting}
-                                    onClick={onSaveDraft}
-                                    title="Simpan sebagai draft tanpa pembayaran"
-                                >
-                                    {submitting ? 'Memproses...' : <><ReceiptText size={16} /> Draft</>}
-                                </button>
-                                <button
-                                    className="btn btn-primary flex-1 justify-center"
-                                    disabled={!canSubmit || submitting}
-                                    onClick={onSubmit}
-                                >
-                                    {submitting ? 'Memproses...' : <><Save size={16} /> Simpan</>}
-                                </button>
-                            </div>
-                        ) : (
+                        <div className="flex items-center gap-2 mt-3">
                             <button
                                 type="button"
-                                className="btn btn-primary w-full justify-center mt-3"
+                                className="btn btn-secondary flex-1 justify-center"
                                 disabled={!canDraft || submitting}
                                 onClick={onSaveDraft}
+                                title="Simpan sementara tanpa diproses — lanjutkan dari tab Pesanan"
                             >
                                 {submitting ? 'Memproses...' : <><ReceiptText size={16} /> Draft</>}
                             </button>
-                        )}
+                            <button
+                                className="btn btn-primary flex-1 justify-center"
+                                disabled={!canSubmit || submitting}
+                                onClick={onSubmit}
+                            >
+                                {submitting ? 'Memproses...' : <><Save size={16} /> Simpan</>}
+                            </button>
+                        </div>
                     </div>
                 </>
             )}
-        </div>
+        </TransactionCard>
     );
 }

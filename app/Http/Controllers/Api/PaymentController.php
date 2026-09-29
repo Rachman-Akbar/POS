@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Events\PaymentProcessed;
 use App\Http\Controllers\Api\Concerns\SafeBroadcasts;
@@ -38,6 +39,23 @@ class PaymentController extends Controller
     }
 
     /**
+     * Cashier view — every invoice transaction, not just the ones still
+     * awaiting settlement. Feeds the "Pesanan" table which pairs the amount
+     * paid against the remaining balance and the kitchen process stage.
+     */
+    public function invoices(): JsonResponse
+    {
+        $invoices = SalesInvoice::query()
+            ->whereIn('status', [InvoiceStatus::Issued->value, InvoiceStatus::Paid->value])
+            ->with(['receipts', 'order' => fn ($query) => $query->with(['items.product', 'customer'])])
+            ->orderByDesc('issued_at')
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json(['data' => $invoices]);
+    }
+
+    /**
      * Cashier settles a Pay Later invoice (final payment/receipt).
      */
     public function settle(Request $request, Order $order): JsonResponse
@@ -63,7 +81,7 @@ class PaymentController extends Controller
         try {
             $method = PaymentMethod::where('code', $data['payment_method'])->where('is_active', true)->first()
                 ?? throw new \DomainException('Metode pembayaran tidak ditemukan.');
-            $receipt = $this->salesService->settlePayment(
+            $settlement = $this->salesService->settlePayment(
                 $order,
                 $method,
                 isset($data['amount']) ? (float) $data['amount'] : null,
@@ -73,11 +91,15 @@ class PaymentController extends Controller
             return response()->json(['message' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $receipt = $settlement['receipt'];
+
         $this->safeBroadcast(new PaymentProcessed($order->fresh(), $receipt));
 
         return response()->json([
             'data' => [
                 'receipt' => $receipt,
+                'applied' => $settlement['applied'],
+                'change' => $settlement['change'],
                 'order' => $order->fresh('invoice.receipts'),
             ],
         ]);
@@ -111,8 +133,10 @@ class PaymentController extends Controller
      */
     public function unpaidOrders(): JsonResponse
     {
+        // Drafts are excluded: an unprocessed draft has no invoice to settle,
+        // so it is not an "unpaid order" in the settlement sense.
         $orders = Order::whereIn('payment_status', [PaymentStatus::Unpaid->value, PaymentStatus::Partial->value])
-            ->where('status', '!=', 'completed')
+            ->whereIn('status', [OrderStatus::Pending->value, OrderStatus::Completed->value])
             ->with(['items.product', 'customer'])
             ->orderBy('created_at')
             ->get();

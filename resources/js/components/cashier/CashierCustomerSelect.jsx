@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Check, Search, User, UserPlus, X } from 'lucide-react';
+import { Building2, Check, Search, User, UserPlus, Users, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { notifyError, notifySuccess } from '../../utils/alerts';
@@ -12,6 +12,8 @@ const CUSTOMER_TYPES = [
 ];
 
 const BUSINESS_FIELDS = ['company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country'];
+
+const WALK_IN_LABEL = 'Pelanggan Umum';
 
 const EMPTY_FORM = {
     customer_type: 'individual',
@@ -152,7 +154,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                 />
                 <input
                     className="input !pl-9 !pr-8"
-                    value={selected && !open ? displayName(selected) : term}
+                    value={open ? term : selected ? displayName(selected) : WALK_IN_LABEL}
                     onFocus={() => {
                         setOpen(true);
                         if (selected) setTerm('');
@@ -164,7 +166,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                     onKeyDown={(event) => {
                         if (event.key === 'Escape') setOpen(false);
                     }}
-                    placeholder={selected ? displayName(selected) : 'Cari nama atau telepon...'}
+                    placeholder="Cari nama atau telepon..."
                 />
                 {(selected || needle) && (
                     <button
@@ -194,7 +196,8 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                                 !selected ? 'bg-accent-soft text-accent-ink font-semibold' : 'hover:bg-surface-2'
                             }`}
                         >
-                            Pelanggan Umum
+                            <Users size={14} className="shrink-0" />
+                            {WALK_IN_LABEL}
                             {!selected && <Check size={14} className="ml-auto" />}
                         </button>
 
@@ -246,6 +249,12 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                     </div>
                 )}
             </div>
+
+            {!open && !selected && (
+                <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1">
+                    <Users size={11} className="shrink-0" /> Pesanan tanpa nama pelanggan, tidak tersimpan di master.
+                </p>
+            )}
 
             {form && (
                 <FormModal
@@ -362,7 +371,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                         )}
 
                         <Field
-                            label={form.customer_type === 'business' ? 'Nama Contacts' : 'Nama Lengkap'}
+                            label={form.customer_type === 'business' ? 'Nama Kontak' : 'Nama Lengkap'}
                             error={errors.name}
                         >
                             <input

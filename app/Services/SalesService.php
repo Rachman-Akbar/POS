@@ -43,42 +43,10 @@ class SalesService
                 'notes' => $options['notes'] ?? null,
             ]);
 
-            $subtotal = 0.0;
-            $cogs = 0.0;
+            [$subtotal, $cogs] = $this->attachItems($order, $items, reserveStock: true);
+            $this->applyTotals($order, $subtotal, $options);
 
-            foreach ($items as $line) {
-                $product = Product::where('is_active', true)->findOrFail($line['product_id']);
-                $qty = max(1, (int) $line['qty']);
-
-                $this->decrementStock($product, $qty);
-
-                OrderItem::create([
-                    'order_id' => $order->id,
-                    'product_id' => $product->id,
-                    'qty' => $qty,
-                    'price' => $product->price,
-                    'notes' => $line['notes'] ?? null,
-                ]);
-
-                $subtotal += $qty * $product->price;
-                $cogs += $qty * $product->cost_price;
-            }
-
-            $discount = min(max((float) ($options['discount'] ?? 0), 0), $subtotal);
-            $taxableBase = $subtotal - $discount;
-
-            $ppnRate = $options['tax_rate'] ?? Setting::get('pos.ppn_rate', 0);
-
-            $taxAmount = round($taxableBase * ((float) $ppnRate / 100), 2);
-            $totalAmount = round($taxableBase + $taxAmount, 2);
-
-            $order->update([
-                'subtotal' => $subtotal,
-                'discount' => $discount,
-                'tax_amount' => $taxAmount,
-                'total_amount' => $totalAmount,
-            ]);
-
+            $totalAmount = (float) $order->total_amount;
             $invoice = $this->issueInvoice($order, $cogs);
 
             if ($paymentType === PaymentType::PayNow) {
@@ -114,9 +82,168 @@ class SalesService
     }
 
     /**
-     * Settle a payment (full or partial) for an outstanding order at checkout.
+     * Save an order as a draft: a temporary, unprocessed record. It is persisted
+     * so the cashier can find it again from the Pesanan list, but it creates no
+     * invoice, reserves no stock, posts no journal and never reaches the
+     * kitchen. A draft only becomes a real order once it is finalized.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @param  array{discount?: float, tax_rate?: float|null, notes?: string|null, customer_id?: int|null}  $options
      */
-    public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null, ?int $paymentAccountId = null): SalesReceipt
+    public function saveDraft(?User $user, string $tableNumber, array $items, array $options = []): Order
+    {
+        return DB::transaction(function () use ($user, $tableNumber, $items, $options) {
+            $order = Order::create([
+                'order_number' => $this->nextOrderNumber(),
+                'table_number' => $tableNumber ?: null,
+                'customer_id' => $options['customer_id'] ?? null,
+                'user_id' => $user?->id,
+                'payment_type' => PaymentType::PayLater->value,
+                'status' => OrderStatus::Draft->value,
+                'payment_status' => PaymentStatus::Unpaid->value,
+                'paid_amount' => 0,
+                'notes' => $options['notes'] ?? null,
+            ]);
+
+            [$subtotal] = $this->attachItems($order, $items, reserveStock: false);
+            $this->applyTotals($order, $subtotal, $options);
+
+            return $order->fresh(['items.product', 'invoice', 'customer']);
+        });
+    }
+
+    /**
+     * Continue a draft: reserve its stock, raise the sales invoice, post the
+     * journal and optionally record the payment, then move the order into the
+     * normal (pending) flow so it reaches the kitchen.
+     *
+     * @param  array{payment_method?: string|null, payment_account_id?: int|null, paid_amount?: float|null}  $options
+     */
+    public function finalizeDraft(Order $order, array $options = []): Order
+    {
+        return DB::transaction(function () use ($order, $options) {
+            // Lock baris order supaya dua permintaan lanjutkan bersamaan tidak
+            // bisa sama-sama menerbitkan invoice dan menarik stok dua kali.
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== OrderStatus::Draft->value) {
+                throw new \DomainException('Pesanan ini bukan draft.');
+            }
+
+            $lines = $locked->items()->get();
+
+            if ($lines->isEmpty()) {
+                throw new \DomainException('Draft tidak memiliki item.');
+            }
+
+            $cogs = 0.0;
+
+            foreach ($lines as $item) {
+                $product = Product::where('is_active', true)->findOrFail($item->product_id);
+                $this->decrementStock($product, $item->qty);
+                $cogs += $item->qty * $product->cost_price;
+            }
+
+            $invoice = $this->issueInvoice($locked, $cogs);
+            $totalAmount = (float) $locked->total_amount;
+
+            $tendered = isset($options['paid_amount']) && $options['paid_amount'] !== null
+                ? (float) $options['paid_amount']
+                : 0.0;
+
+            $applied = round(min(max($tendered, 0), $totalAmount), 2);
+
+            if ($applied > 0) {
+                $method = PaymentMethod::where('code', $options['payment_method'] ?? 'cash')->where('is_active', true)->first()
+                    ?? PaymentMethod::where('code', 'cash')->firstOrFail();
+                $account = $this->resolvePaymentAccount($method, $options['payment_account_id'] ?? null);
+                $this->processPayment($invoice, $method, $applied, $account);
+            }
+
+            $locked->update([
+                'status' => OrderStatus::Pending->value,
+                'payment_type' => $applied >= $totalAmount && $totalAmount > 0
+                    ? PaymentType::PayNow->value
+                    : PaymentType::PayLater->value,
+                'paid_amount' => $applied,
+                'payment_status' => match (true) {
+                    $applied <= 0 => PaymentStatus::Unpaid->value,
+                    $applied >= $totalAmount => PaymentStatus::Paid->value,
+                    default => PaymentStatus::Partial->value,
+                },
+            ]);
+
+            return $locked->fresh(['items.product', 'invoice', 'invoice.receipts', 'customer']);
+        });
+    }
+
+    /**
+     * Create the order item rows and return [subtotal, cogs]. When
+     * $reserveStock is false (drafts) stock is not decremented and a short
+     * stock is tolerated until the draft is finalized.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @return array{0: float, 1: float}
+     */
+    private function attachItems(Order $order, array $items, bool $reserveStock): array
+    {
+        $subtotal = 0.0;
+        $cogs = 0.0;
+
+        foreach ($items as $line) {
+            $product = Product::where('is_active', true)->findOrFail($line['product_id']);
+            $qty = max(1, (int) $line['qty']);
+
+            if ($reserveStock) {
+                $this->decrementStock($product, $qty);
+            }
+
+            OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'qty' => $qty,
+                'price' => $product->price,
+                'notes' => $line['notes'] ?? null,
+            ]);
+
+            $subtotal += $qty * $product->price;
+            $cogs += $qty * $product->cost_price;
+        }
+
+        return [$subtotal, $cogs];
+    }
+
+    /**
+     * Compute discount/tax/total and store them on the order.
+     *
+     * @param  array{discount?: float, tax_rate?: float|null}  $options
+     */
+    private function applyTotals(Order $order, float $subtotal, array $options): void
+    {
+        $discount = min(max((float) ($options['discount'] ?? 0), 0), $subtotal);
+        $taxableBase = $subtotal - $discount;
+        $ppnRate = $options['tax_rate'] ?? Setting::get('pos.ppn_rate', 0);
+        $taxAmount = round($taxableBase * ((float) $ppnRate / 100), 2);
+        $totalAmount = round($taxableBase + $taxAmount, 2);
+
+        $order->update([
+            'subtotal' => $subtotal,
+            'discount' => $discount,
+            'tax_amount' => $taxAmount,
+            'total_amount' => $totalAmount,
+        ]);
+    }
+
+    /**
+     * Settle a payment (full or partial) for an outstanding order at checkout.
+     *
+     * The cashier may tender more than the outstanding balance; only the
+     * balance is ever recorded as a receipt and the surplus is handed back as
+     * change, so overpayment can never inflate revenue or the journal.
+     *
+     * @return array{receipt: SalesReceipt, change: float, applied: float}
+     */
+    public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null, ?int $paymentAccountId = null): array
     {
         if ($order->payment_status === PaymentStatus::Paid->value) {
             throw new \DomainException('Order ini sudah lunas.');
@@ -136,13 +263,14 @@ class SalesService
                 throw new \DomainException('Faktur ini sudah lunas.');
             }
 
-            $payAmount = $amount === null
-                ? $remaining
-                : round(min(max((float) $amount, 0), $remaining), 2);
+            $tendered = $amount === null ? $remaining : round(max((float) $amount, 0), 2);
+            $payAmount = round(min($tendered, $remaining), 2);
 
             if ($payAmount <= 0) {
                 throw new \DomainException('Nominal pembayaran tidak valid.');
             }
+
+            $change = round(max($tendered - $payAmount, 0), 2);
 
             $account = $this->resolvePaymentAccount($method, $paymentAccountId);
             $receipt = $this->processPayment($invoice, $method, $payAmount, $account);
@@ -155,7 +283,11 @@ class SalesService
                     : PaymentStatus::Partial->value,
             ]);
 
-            return $receipt;
+            return [
+                'receipt' => $receipt,
+                'applied' => $payAmount,
+                'change' => $change,
+            ];
         });
     }
 
