@@ -229,4 +229,81 @@ class CashierCustomerTest extends TestCase
         $this->assertSame((float) $order->total_amount, (float) $invoice->total_amount);
         $this->assertSame(1, $invoice->receipts()->count());
     }
+
+    /**
+     * Kasir tidak memilih tipe pelanggan; formulir ringkas selalu perorangan dan
+     * tidak mengirim field badan usaha sama sekali.
+     */
+    public function test_cashier_can_register_an_individual_customer_without_business_fields(): void
+    {
+        $response = $this->actingAs($this->cashier)->postJson('/api/customers', [
+            'customer_type' => CustomerType::Individual->value,
+            'name' => 'Siti Aminah',
+            'email' => 'siti.aminah@example.com',
+            'phone' => '0812 3456 7890',
+            'address' => 'Jl. Merdeka No. 10',
+        ]);
+
+        $response->assertCreated()->assertJsonPath('data.customer_type', CustomerType::Individual->value);
+
+        $this->assertDatabaseHas('customers', [
+            'name' => 'Siti Aminah',
+            'email' => 'siti.aminah@example.com',
+            'customer_type' => CustomerType::Individual->value,
+        ]);
+
+        $this->assertNull(Customer::firstOrFail()->company_name);
+    }
+
+    /**
+     * Kasir memilih tipe pelanggan sendiri; saat "Perusahaan" dipilih, backend
+     * mewajibkan seluruh field badan usaha terkirim.
+     */
+    public function test_cashier_can_register_a_business_customer_from_the_same_form(): void
+    {
+        $response = $this->actingAs($this->cashier)->postJson('/api/customers', [
+            'customer_type' => CustomerType::Business->value,
+            'company_name' => 'PT Nusantara Jaya',
+            'nik' => '3273010101900001',
+            'npwp' => '01.234.567.8-901.000',
+            'province' => 'Jawa Barat',
+            'city' => 'Bandung',
+            'postal_code' => '40115',
+            'country' => 'Indonesia',
+            'name' => 'Rudi Hartono',
+            'email' => 'rudi.hartono@example.com',
+            'phone' => '0812 4444 4444',
+        ]);
+
+        $response->assertCreated()->assertJsonPath('data.customer_type', CustomerType::Business->value);
+
+        $this->assertDatabaseHas('customers', [
+            'company_name' => 'PT Nusantara Jaya',
+            'customer_type' => CustomerType::Business->value,
+        ]);
+    }
+
+    public function test_customer_search_matches_name_and_phone(): void
+    {
+        Customer::factory()->create(['name' => 'Budi Santoso', 'phone' => '0812 1111 1111']);
+        Customer::factory()->create(['name' => 'Ani Lestari', 'phone' => '0812 2222 2222']);
+
+        $byName = $this->actingAs($this->cashier)->getJson('/api/customers?search=Budi');
+        $byName->assertOk()->assertJsonPath('data.0.name', 'Budi Santoso');
+
+        $byPhone = $this->actingAs($this->cashier)->getJson('/api/customers?search=2222');
+        $byPhone->assertOk()->assertJsonPath('data.0.name', 'Ani Lestari');
+    }
+
+    public function test_customer_creation_rejects_duplicate_email(): void
+    {
+        Customer::factory()->create(['email' => 'kembar@example.com']);
+
+        $this->actingAs($this->cashier)->postJson('/api/customers', [
+            'customer_type' => CustomerType::Individual->value,
+            'name' => 'Kembar',
+            'email' => 'kembar@example.com',
+            'phone' => '0812 3333 3333',
+        ])->assertStatus(422)->assertJsonValidationErrors('email');
+    }
 }

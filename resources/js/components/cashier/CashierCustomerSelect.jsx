@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, Check, Search, User, UserPlus, X } from 'lucide-react';
 import { api } from '../../api/client';
+import { useClickOutside } from '../../hooks/useClickOutside';
 import { notifyError, notifySuccess } from '../../utils/alerts';
 import FormModal, { Field, FieldRow } from '../admin/FormModal';
 
-const TYPES = [
+const CUSTOMER_TYPES = [
     { key: 'individual', label: 'Perorangan', icon: User },
-    { key: 'business', label: 'Badan Usaha', icon: Building2 },
+    { key: 'business', label: 'Perusahaan', icon: Building2 },
 ];
 
 const BUSINESS_FIELDS = ['company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country'];
@@ -15,8 +16,8 @@ const BUSINESS_FIELDS = ['company_name', 'nik', 'npwp', 'province', 'city', 'pos
 const EMPTY_FORM = {
     customer_type: 'individual',
     name: '',
-    email: '',
     phone: '',
+    email: '',
     address: '',
     company_name: '',
     nik: '',
@@ -27,27 +28,59 @@ const EMPTY_FORM = {
     country: 'Indonesia',
 };
 
+function displayName(customer) {
+    return customer.company_name || customer.name;
+}
+
+function displayDetail(customer) {
+    if (customer.customer_type === 'business') {
+        return [customer.name, 'Badan Usaha'].filter(Boolean).join(' · ');
+    }
+    return customer.phone || '';
+}
+
+function TypeIcon({ customer }) {
+    return customer.customer_type === 'business' ? (
+        <Building2 size={12} className="text-faint shrink-0" />
+    ) : (
+        <User size={12} className="text-faint shrink-0" />
+    );
+}
+
 /**
  * Pemilih pelanggan untuk layar kasir.
  *
- * Dua alur: cari pelanggan yang sudah ada, atau daftarkan pelanggan baru
- * (perorangan / badan usaha) tanpa meninggalkan halaman transaksi.
+ * Satu dropdown pencarian: pilih pelanggan yang sudah ada, atau ketika tidak
+ * ketemu, buat pelanggan baru lewat entri "Daftarkan baru" di bagian bawah
+ * daftar. Kasir hanya mendaftarkan pelanggan perorangan; data badan usaha
+ * (NPWP, NIK penanggung jawab, dan sejenisnya) lengkap di menu admin.
  */
-export default function CashierCustomerPicker({ selected, onChange }) {
+export default function CashierCustomerSelect({ selected, onChange }) {
     const queryClient = useQueryClient();
     const [term, setTerm] = useState('');
+    const [open, setOpen] = useState(false);
     const [form, setForm] = useState(null);
     const [errors, setErrors] = useState({});
+    const [needle, setNeedle] = useState('');
+    const ref = useClickOutside(() => setOpen(false));
 
-    const needle = term.trim();
+    // Debounce agar tiap ketikan tidak langsung menembak API.
+    useEffect(() => {
+        const timer = setTimeout(() => setNeedle(term.trim()), 250);
+        return () => clearTimeout(timer);
+    }, [term]);
 
     const { data: response, isFetching } = useQuery({
         queryKey: ['cashier-customers', needle],
-        queryFn: async () => (await api.get('/customers', { params: { search: needle || undefined } })).data,
-        enabled: needle.length > 0,
+        queryFn: async () =>
+            (await api.get('/customers', { params: { search: needle || undefined, per_page: 20 } })).data,
     });
 
     const results = response?.data ?? [];
+
+    const exactMatch = results.some(
+        (customer) => displayName(customer).toLowerCase() === needle.toLowerCase(),
+    );
 
     const createCustomer = useMutation({
         mutationFn: (payload) => api.post('/customers', payload),
@@ -57,6 +90,7 @@ export default function CashierCustomerPicker({ selected, onChange }) {
             onChange(result.data.data);
             setForm(null);
             setTerm('');
+            setOpen(false);
             notifySuccess('Pelanggan tersimpan dan langsung dipilih.');
         },
         onError: (error) => {
@@ -65,8 +99,8 @@ export default function CashierCustomerPicker({ selected, onChange }) {
         },
     });
 
-    const openForm = (customerType = 'individual') =>
-        setForm({ ...EMPTY_FORM, customer_type: customerType });
+    const openForm = (prefillName = '') =>
+        setForm({ ...EMPTY_FORM, name: prefillName });
 
     const setFormType = (value) =>
         setForm((current) => ({
@@ -78,16 +112,21 @@ export default function CashierCustomerPicker({ selected, onChange }) {
         }));
 
     const submitForm = () => {
-        const payload = Object.fromEntries(
-            Object.entries(form).filter(([, value]) => String(value ?? '').trim() !== ''),
-        );
+        const payload = {
+            customer_type: form.customer_type,
+            ...Object.fromEntries(
+                Object.entries(form).filter(([, value]) => String(value ?? '').trim() !== ''),
+            ),
+        };
 
         createCustomer.mutate(payload);
     };
 
     const canSubmit = form
         ? form.customer_type === 'business'
-            ? ['name', 'email', 'phone', ...BUSINESS_FIELDS].every((key) => String(form[key] ?? '').trim())
+            ? ['name', 'email', 'phone', ...BUSINESS_FIELDS].every((key) =>
+                  String(form[key] ?? '').trim(),
+              )
             : ['name', 'email', 'phone'].every((key) => String(form[key] ?? '').trim())
         : false;
 
@@ -106,92 +145,111 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                 )}
             </div>
 
-            {selected ? (
-                <div className="flex items-center gap-2 bg-accent-soft rounded-xl px-3 py-2.5">
-                    {selected.customer_type === 'business' ? (
-                        <Building2 size={16} className="text-accent-ink shrink-0" />
-                    ) : (
-                        <User size={16} className="text-accent-ink shrink-0" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-accent-ink truncate">
-                            {selected.company_name || selected.name}
-                        </div>
-                        <div className="text-[11px] text-accent-ink/80 truncate">
-                            {selected.company_name ? `${selected.name} · ` : ''}
-                            {selected.customer_type === 'business' ? 'Badan Usaha' : 'Perorangan'}
-                        </div>
-                    </div>
-                    <Check size={16} className="text-accent-ink shrink-0" />
-                </div>
-            ) : (
-                <>
-                    <div className="relative">
-                        <Search
-                            size={15}
-                            className="text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
-                        />
-                        <input
-                            className="input !pl-9"
-                            value={term}
-                            onChange={(event) => setTerm(event.target.value)}
-                            placeholder="Cari nama, telepon, atau NIK..."
-                        />
-                    </div>
+            <div className="relative" ref={ref}>
+                <Search
+                    size={15}
+                    className="text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
+                />
+                <input
+                    className="input !pl-9 !pr-8"
+                    value={selected && !open ? displayName(selected) : term}
+                    onFocus={() => {
+                        setOpen(true);
+                        if (selected) setTerm('');
+                    }}
+                    onChange={(event) => {
+                        setTerm(event.target.value);
+                        setOpen(true);
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Escape') setOpen(false);
+                    }}
+                    placeholder={selected ? displayName(selected) : 'Cari nama atau telepon...'}
+                />
+                {(selected || needle) && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (selected) onChange(null);
+                            setTerm('');
+                            setOpen(true);
+                        }}
+                        title="Hapus pilihan"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-content cursor-pointer"
+                    >
+                        <X size={14} />
+                    </button>
+                )}
 
-                    {needle && (
-                        <div className="mt-2 max-h-56 overflow-y-auto scrollbar-thin border border-line rounded-xl bg-surface">
-                            {isFetching ? (
-                                <p className="text-xs text-muted text-center py-3">Mencari...</p>
-                            ) : results.length === 0 ? (
-                                <p className="text-xs text-muted text-center py-3">Pelanggan tidak ditemukan.</p>
-                            ) : (
-                                results.map((customer) => (
-                                    <button
-                                        key={customer.id}
-                                        type="button"
-                                        onClick={() => {
-                                            onChange(customer);
-                                            setTerm('');
-                                        }}
-                                        className="w-full text-left px-3 py-2 hover:bg-surface-2 transition-colors cursor-pointer border-b border-line last:border-b-0"
-                                    >
-                                        <div className="text-sm font-semibold truncate flex items-center gap-1.5">
-                                            {customer.customer_type === 'business' ? (
-                                                <Building2 size={12} className="text-faint shrink-0" />
-                                            ) : (
-                                                <User size={12} className="text-faint shrink-0" />
-                                            )}
-                                            {customer.company_name || customer.name}
-                                        </div>
-                                        <div className="text-[11px] text-muted truncate">
-                                            {customer.company_name ? `${customer.name} · ` : ''}
-                                            {customer.phone}
-                                        </div>
-                                    </button>
-                                ))
-                            )}
-                        </div>
-                    )}
+                {open && (
+                    <div className="absolute left-0 right-0 top-12 max-h-72 overflow-y-auto scrollbar-thin bg-surface rounded-xl shadow-xl z-40 py-1">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onChange(null);
+                                setTerm('');
+                                setOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left cursor-pointer transition-colors ${
+                                !selected ? 'bg-accent-soft text-accent-ink font-semibold' : 'hover:bg-surface-2'
+                            }`}
+                        >
+                            Pelanggan Umum
+                            {!selected && <Check size={14} className="ml-auto" />}
+                        </button>
 
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                        {TYPES.map((item) => (
-                            <button
-                                key={item.key}
-                                type="button"
-                                onClick={() => openForm(item.key)}
-                                className="btn btn-ghost !text-[11px] flex items-center justify-center gap-1.5"
-                            >
-                                <item.icon size={13} /> {item.label}
-                            </button>
-                        ))}
+                        {isFetching ? (
+                            <p className="text-xs text-muted text-center py-3">Mencari...</p>
+                        ) : (
+                            results.map((customer) => (
+                                <button
+                                    key={customer.id}
+                                    type="button"
+                                    onClick={() => {
+                                        onChange(customer);
+                                        setTerm('');
+                                        setOpen(false);
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer transition-colors ${
+                                        selected?.id === customer.id
+                                            ? 'bg-accent-soft text-accent-ink font-semibold'
+                                            : 'hover:bg-surface-2'
+                                    }`}
+                                >
+                                    <TypeIcon customer={customer} />
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block text-sm font-semibold truncate">
+                                            {displayName(customer)}
+                                        </span>
+                                        <span className="block text-[11px] opacity-70 truncate">
+                                            {displayDetail(customer)}
+                                        </span>
+                                    </span>
+                                    {selected?.id === customer.id && <Check size={14} className="shrink-0" />}
+                                </button>
+                            ))
+                        )}
+
+                        {needle && !exactMatch && (
+                            <>
+                                <div className="border-t border-line my-1" />
+                                <button
+                                    type="button"
+                                    onClick={() => openForm(needle)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left font-semibold text-accent-ink hover:bg-accent-soft transition-colors cursor-pointer"
+                                >
+                                    <UserPlus size={14} className="shrink-0" />
+                                    <span className="truncate">Daftarkan &ldquo;{needle}&rdquo; sebagai pelanggan baru</span>
+                                </button>
+                            </>
+                        )}
                     </div>
-                </>
-            )}
+                )}
+            </div>
 
             {form && (
                 <FormModal
-                    title={form.customer_type === 'business' ? 'Pelanggan Badan Usaha' : 'Pelanggan Perorangan'}
+                    title="Pelanggan Baru"
                     subtitle="Data tersimpan ke master pelanggan."
                     width="max-w-2xl"
                     onClose={() => setForm(null)}
@@ -201,9 +259,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                 >
                     <div className="space-y-3">
                         <div>
-                            <label className="label">Tipe Pelanggan</label>
+                            <span className="label">Tipe Pelanggan</span>
                             <div className="grid grid-cols-2 gap-2">
-                                {TYPES.map((item) => (
+                                {CUSTOMER_TYPES.map((item) => (
                                     <button
                                         key={item.key}
                                         type="button"
@@ -211,7 +269,7 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                         className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                                             form.customer_type === item.key
                                                 ? 'bg-accent-soft text-accent-ink'
-                                                : 'bg-surface-3 text-muted hover:bg-surface-3'
+                                                : 'bg-surface-2 text-muted hover:bg-surface-3'
                                         }`}
                                     >
                                         <item.icon size={14} /> {item.label}
@@ -226,7 +284,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                     <input
                                         className="input"
                                         value={form.company_name}
-                                        onChange={(event) => setForm({ ...form, company_name: event.target.value })}
+                                        onChange={(event) =>
+                                            setForm({ ...form, company_name: event.target.value })
+                                        }
                                         placeholder="mis. PT Nusantara Jaya"
                                     />
                                 </Field>
@@ -238,7 +298,10 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                             maxLength={16}
                                             value={form.nik}
                                             onChange={(event) =>
-                                                setForm({ ...form, nik: event.target.value.replace(/\D/g, '') })
+                                                setForm({
+                                                    ...form,
+                                                    nik: event.target.value.replace(/\D/g, ''),
+                                                })
                                             }
                                             placeholder="3273010101900001"
                                         />
@@ -247,7 +310,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                         <input
                                             className="input"
                                             value={form.npwp}
-                                            onChange={(event) => setForm({ ...form, npwp: event.target.value })}
+                                            onChange={(event) =>
+                                                setForm({ ...form, npwp: event.target.value })
+                                            }
                                             placeholder="01.234.567.8-901.000"
                                         />
                                     </Field>
@@ -265,7 +330,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                         <input
                                             className="input"
                                             value={form.province}
-                                            onChange={(event) => setForm({ ...form, province: event.target.value })}
+                                            onChange={(event) =>
+                                                setForm({ ...form, province: event.target.value })
+                                            }
                                             placeholder="mis. Jawa Barat"
                                         />
                                     </Field>
@@ -275,7 +342,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                         <input
                                             className="input"
                                             value={form.postal_code}
-                                            onChange={(event) => setForm({ ...form, postal_code: event.target.value })}
+                                            onChange={(event) =>
+                                                setForm({ ...form, postal_code: event.target.value })
+                                            }
                                             placeholder="40115"
                                         />
                                     </Field>
@@ -283,7 +352,9 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                         <input
                                             className="input"
                                             value={form.country}
-                                            onChange={(event) => setForm({ ...form, country: event.target.value })}
+                                            onChange={(event) =>
+                                                setForm({ ...form, country: event.target.value })
+                                            }
                                         />
                                     </Field>
                                 </FieldRow>
@@ -304,15 +375,6 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                         </Field>
 
                         <FieldRow>
-                            <Field label="Email" error={errors.email}>
-                                <input
-                                    className="input"
-                                    type="email"
-                                    value={form.email}
-                                    onChange={(event) => setForm({ ...form, email: event.target.value })}
-                                    placeholder="nama@email.com"
-                                />
-                            </Field>
                             <Field label="Nomor HP" error={errors.phone}>
                                 <input
                                     className="input"
@@ -320,6 +382,15 @@ export default function CashierCustomerPicker({ selected, onChange }) {
                                     value={form.phone}
                                     onChange={(event) => setForm({ ...form, phone: event.target.value })}
                                     placeholder="0812 3456 7890"
+                                />
+                            </Field>
+                            <Field label="Email" error={errors.email}>
+                                <input
+                                    className="input"
+                                    type="email"
+                                    value={form.email}
+                                    onChange={(event) => setForm({ ...form, email: event.target.value })}
+                                    placeholder="nama@email.com"
                                 />
                             </Field>
                         </FieldRow>

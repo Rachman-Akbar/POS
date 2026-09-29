@@ -11,7 +11,7 @@ import QrisQrCode from '../components/QrisQrCode';
 import CurrencyInput from '../components/CurrencyInput';
 import Price, { PriceRow } from '../components/Price';
 import SearchSelect from '../components/SearchSelect';
-import CashierCustomerPicker from '../components/cashier/CashierCustomerPicker';
+import CashierCustomerSelect from '../components/cashier/CashierCustomerSelect';
 import { PayMethodBadge } from '../components/badges';
 import { api, formatIDR, parseNumber } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
@@ -276,8 +276,6 @@ export default function CashierDashboard() {
         ],
         activeNav: tab === 'cart' ? 'orders' : tab,
         onNavChange: setTab,
-        onCheckOrders: () => setTab((t) => (t === 'cart' ? 'orders' : 'cart')),
-        orderCount: cart.reduce((sum, line) => sum + line.qty, 0),
     };
 
     const checkoutSidebar = (
@@ -321,6 +319,7 @@ export default function CashierDashboard() {
             onClear={resetCheckout}
             onSubmit={() => submitOrder('pay_now')}
             onSaveDraft={() => submitOrder('pay_later')}
+            onViewChange={setTab}
         />
     );
 
@@ -388,7 +387,13 @@ export default function CashierDashboard() {
             )}
 
             {tab === 'draft' && (
-                <div>
+                <div className="card">
+                    <div className="flex items-center justify-between gap-2 pb-3 mb-4">
+                        <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
+                            <ReceiptText size={16} /> Draft
+                        </h3>
+                    </div>
+
                     {pending.length === 0 ? (
                         <div className="card text-muted text-center py-10">Tidak ada draft menunggu pelunasan.</div>
                     ) : (
@@ -464,7 +469,13 @@ export default function CashierDashboard() {
             )}
 
             {tab === 'history' && (
-                <div>
+                <div className="card">
+                    <div className="flex items-center justify-between gap-2 pb-3 mb-4">
+                        <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
+                            <ScrollText size={16} /> Riwayat
+                        </h3>
+                    </div>
+
                     {today.length === 0 ? (
                         <div className="card text-muted text-center py-10">Belum ada transaksi hari ini.</div>
                     ) : (
@@ -763,6 +774,28 @@ function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, se
     );
 }
 
+/**
+ * Tombol "Cek Pesanan" di sebelah kanan label Rincian Pesanan.
+ *
+ * Navigasi ke Draft dan Riwayat sudah pindah ke dropdown header, jadi tombol
+ * ini hanya punya satu fungsi: membuka tampilan penuh keranjang.
+ */
+function CheckOrdersButton({ onClick, itemCount = 0 }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="btn btn-ghost !text-[11px] !px-2 !py-1 flex items-center gap-1.5 cursor-pointer shrink-0"
+            title="Buka tampilan penuh keranjang"
+        >
+            <ShoppingCart size={13} /> Cek Pesanan
+            {itemCount > 0 && (
+                <span className="badge badge-pending !px-1.5 !py-0 !text-[10px]">{itemCount}</span>
+            )}
+        </button>
+    );
+}
+
 function CheckoutPanel({
     cart, products = [], updateQty, removeLine,
     table, setTable, enableTable, tableNumbers,
@@ -772,6 +805,7 @@ function CheckoutPanel({
     paymentMethod, onPaymentMethodChange, payMethods, defaultAccount, qrisId,
     totals, paidRaw, onPaidChange, paid, change,
     payOpen, onPayToggle, canSubmit, canDraft, submitting, onSubmit, onSaveDraft, onClear,
+    onViewChange,
 }) {
     const totalAmount = totals.total;
     const empty = cart.length === 0;
@@ -828,28 +862,32 @@ function CheckoutPanel({
                         )}
 
                         {enableCustomer && (
-                            <CashierCustomerPicker selected={customer} onChange={onCustomerChange} />
+                            <CashierCustomerSelect selected={customer} onChange={onCustomerChange} />
                         )}
 
-                        <div>
-                            <span className="label">Rincian Pesanan</span>
-                            <div className="space-y-2">
-                                {cart.map((line) => (
-                                    <div key={line.product_id} className="flex items-center gap-2 bg-surface-2 rounded-xl p-2">
-                                        <LineThumb product={productOf(line.product_id)} />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm font-semibold truncate">{line.name}</div>
-                                            <div className="text-[11px] text-muted">
-                                                {formatIDR(line.price)} · <span className="text-accent font-semibold">{formatIDR(line.price * line.qty)}</span>
-                                            </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="label !mb-0">Rincian Pesanan</span>
+                            <CheckOrdersButton
+                                onClick={() => onViewChange('cart')}
+                                itemCount={cart.reduce((sum, line) => sum + line.qty, 0)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            {cart.map((line) => (
+                                <div key={line.product_id} className="flex items-center gap-2 bg-surface-2 rounded-xl p-2">
+                                    <LineThumb product={productOf(line.product_id)} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-semibold truncate">{line.name}</div>
+                                        <div className="text-[11px] text-muted">
+                                            {formatIDR(line.price)} · <span className="text-accent font-semibold">{formatIDR(line.price * line.qty)}</span>
                                         </div>
-                                        <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} />
-                                        <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1" title="Hapus item">
-                                            <Trash2 size={14} />
-                                        </button>
                                     </div>
-                                ))}
-                            </div>
+                                    <QtyStepper qty={line.qty} onChange={(delta) => updateQty(line.product_id, delta)} />
+                                    <button onClick={() => removeLine(line.product_id)} className="text-negative hover:text-red-700 dark:hover:text-red-300 p-1" title="Hapus item">
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            ))}
                         </div>
                     </div>
 

@@ -39,8 +39,6 @@ export default function TopHeader({
     navItems = [],
     activeNav,
     onNavChange,
-    onCheckOrders,
-    orderCount = 0,
 }) {
     const navigate = useNavigate();
     const { pathname } = useLocation();
@@ -97,6 +95,8 @@ export default function TopHeader({
                     </div>
                 )}
 
+                <div className="flex-1" />
+
                 {navItems.length > 0 && (
                     <div className="relative shrink-0" ref={navRef}>
                         <button onClick={() => setNavOpen((v) => !v)} className="btn btn-ghost !px-3">
@@ -104,7 +104,7 @@ export default function TopHeader({
                             <ChevronDown size={14} className={`transition-transform ${navOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {navOpen && (
-                            <div className="absolute left-0 top-12 w-56 bg-surface rounded-lg py-1.5 shadow-xl z-40">
+                            <div className="absolute right-0 top-12 w-56 bg-surface rounded-lg py-1.5 shadow-xl z-40">
                                 {navItems.map((item) => (
                                     <button
                                         key={item.key}
@@ -128,19 +128,6 @@ export default function TopHeader({
                             </div>
                         )}
                     </div>
-                )}
-
-                <div className="flex-1" />
-
-                {onCheckOrders && (
-                    <button onClick={onCheckOrders} className="btn btn-ghost shrink-0 relative">
-                        <span className="hidden md:inline">Cek Pesanan</span>
-                        {orderCount > 0 && (
-                            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold flex items-center justify-center">
-                                {orderCount}
-                            </span>
-                        )}
-                    </button>
                 )}
 
                 <ThemePicker />
