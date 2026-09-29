@@ -18,6 +18,7 @@ class ChartOfAccountSeeder extends Seeder
             ['code' => '1300', 'name' => 'Kas', 'type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '1310', 'name' => 'Bank', 'type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '1320', 'name' => 'QRIS', 'type' => 'asset', 'normal_balance' => 'debit'],
+            ['code' => '1330', 'name' => 'Dompet Digital', 'type' => 'asset', 'normal_balance' => 'debit'],
             ['code' => '2500', 'name' => 'PPN Keluaran', 'type' => 'liability', 'normal_balance' => 'credit'],
             ['code' => '4000', 'name' => 'Pendapatan Penjualan', 'type' => 'revenue', 'normal_balance' => 'credit'],
             ['code' => '5100', 'name' => 'HPP', 'type' => 'expense', 'normal_balance' => 'debit'],

@@ -55,6 +55,40 @@ class CustomerController extends Controller
         ]);
     }
 
+    /**
+     * Pencarian pelanggan untuk layar kasir.
+     *
+     * Berbeda dengan `index` (master data admin), endpoint ini Ringkas: hanya
+     * pelanggan aktif, tanpa pagination meta, dan tanpa `orders_count` yang
+     * tidak dibutuhkan kasir.
+     */
+    public function search(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:20'],
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+
+        $customers = Customer::query()
+            ->where('is_active', true)
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($inner) use ($search): void {
+                    $inner->where('name', 'like', "%{$search}%")
+                        ->orWhere('company_name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%")
+                        ->orWhere('nik', 'like', "%{$search}%");
+                });
+            })
+            ->orderBy('name')
+            ->limit((int) ($validated['limit'] ?? 10))
+            ->get(['id', 'customer_type', 'name', 'company_name', 'email', 'phone', 'nik', 'npwp', 'address', 'province', 'city', 'postal_code', 'country']);
+
+        return response()->json(['data' => $customers]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $customer = Customer::create($this->validated($request));

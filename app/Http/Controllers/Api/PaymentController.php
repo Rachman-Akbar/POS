@@ -30,7 +30,7 @@ class PaymentController extends Controller
     public function pending(): JsonResponse
     {
         $invoices = SalesInvoice::where('status', InvoiceStatus::Issued->value)
-            ->with(['receipts', 'order' => fn ($query) => $query->with('items.product')])
+            ->with(['receipts', 'order' => fn ($query) => $query->with(['items.product', 'customer'])])
             ->orderByDesc('issued_at')
             ->get();
 
@@ -113,7 +113,7 @@ class PaymentController extends Controller
     {
         $orders = Order::whereIn('payment_status', [PaymentStatus::Unpaid->value, PaymentStatus::Partial->value])
             ->where('status', '!=', 'completed')
-            ->with(['items.product'])
+            ->with(['items.product', 'customer'])
             ->orderBy('created_at')
             ->get();
 

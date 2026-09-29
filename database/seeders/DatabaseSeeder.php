@@ -18,21 +18,44 @@ class DatabaseSeeder extends Seeder
         $this->call([
             ChartOfAccountSeeder::class,
             PaymentMethodSeeder::class,
+            CashBankAccountSeeder::class,
             SettingSeeder::class,
+            CategorySeeder::class,
             ProductSeeder::class,
+            CustomerSeeder::class,
         ]);
 
-        if (! app()->isProduction()) {
-            $this->call(TestingSeeder::class);
-        }
+        $this->call(SalesTransactionSeeder::class);
 
+        $this->generateProductImages();
+        $this->seedUsers();
+    }
+
+    /**
+     * Pembuat gambar produk.
+     *
+     * Dipanggil dari sini (bukan ProductSeeder) supaya seeder produk tetap
+     * bebas efek samping berkas saat dipakai oleh test.
+     */
+    private function generateProductImages(): void
+    {
+        $this->command?->call('products:images', ['--prune' => true]);
+    }
+
+    /**
+     * AkunStaff awal. Password default: `password`.
+     */
+    private function seedUsers(): void
+    {
         $password = 'password';
 
         foreach ([
-            ['name' => 'Admin', 'email' => 'admin@pos.test', 'role' => 'admin'],
-            ['name' => 'Waiter', 'email' => 'waiter@pos.test', 'role' => 'waiter'],
-            ['name' => 'Koki', 'email' => 'koki@pos.test', 'role' => 'kitchen'],
-            ['name' => 'Kasir', 'email' => 'kasir@pos.test', 'role' => 'cashier'],
+            ['name' => 'Ahmad Fauzi', 'email' => 'ahmad.fauzi@warungnusantara.id', 'role' => 'admin'],
+            ['name' => 'Siti Rahayu', 'email' => 'siti.rahayu@warungnusantara.id', 'role' => 'cashier'],
+            ['name' => 'Budi Santoso', 'email' => 'budi.santoso@warungnusantara.id', 'role' => 'cashier'],
+            ['name' => 'Rina Wulandari', 'email' => 'rina.wulandari@warungnusantara.id', 'role' => 'waiter'],
+            ['name' => 'Agus Prasetyo', 'email' => 'agus.prasetyo@warungnusantara.id', 'role' => 'kitchen'],
+            ['name' => 'Dewi Lestari', 'email' => 'dewi.lestari@warungnusantara.id', 'role' => 'kitchen'],
         ] as $user) {
             User::query()->updateOrCreate(
                 ['email' => $user['email']],

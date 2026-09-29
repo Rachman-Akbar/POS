@@ -18,6 +18,7 @@ class Setting extends Model
         'cashier_show_favorites' => true,
         'cashier_show_stock' => true,
         'cashier_enable_table' => true,
+        'cashier_enable_customer' => true,
         'cashier_enable_ppn' => true,
         'cashier_enable_prepay' => false,
     ];

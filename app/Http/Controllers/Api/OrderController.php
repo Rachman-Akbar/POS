@@ -26,7 +26,7 @@ class OrderController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $orders = Order::with(['items' => fn ($query) => $query->with('product'), 'invoice'])
+        $orders = Order::with(['items' => fn ($query) => $query->with('product'), 'invoice', 'customer'])
             ->when($request->boolean('active_only'), function ($query) use ($request) {
                 $status = $request->query('status');
                 $query->where('status', '!=', 'completed');
@@ -53,6 +53,11 @@ class OrderController extends Controller
     {
         $data = $request->validate([
             'table_number' => ['nullable', 'string', 'max:50'],
+            'customer_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('customers', 'id')->where('is_active', true),
+            ],
             'payment_type' => ['required', 'in:pay_now,pay_later'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'discount' => ['nullable', 'numeric', 'min:0'],
@@ -76,6 +81,7 @@ class OrderController extends Controller
             'items.*.notes' => ['nullable', 'string', 'max:500'],
         ], [
             'payment_account_id.exists' => 'Rekening tidak sesuai dengan metode pembayaran yang dipilih.',
+            'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
         ]);
 
         try {
@@ -91,6 +97,7 @@ class OrderController extends Controller
                     'payment_account_id' => $data['payment_account_id'] ?? null,
                     'paid_amount' => isset($data['paid_amount']) ? (float) $data['paid_amount'] : null,
                     'notes' => $data['notes'] ?? null,
+                    'customer_id' => $data['customer_id'] ?? null,
                 ],
             );
         } catch (\DomainException $e) {
@@ -99,7 +106,7 @@ class OrderController extends Controller
 
         $this->safeBroadcast(new OrderCreated($order));
 
-        return response()->json(['data' => $order], Response::HTTP_CREATED);
+        return response()->json(['data' => $order->load('customer')], Response::HTTP_CREATED);
     }
 
     /**

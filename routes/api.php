@@ -29,6 +29,10 @@ Route::post('/orders', [OrderController::class, 'store']);
 Route::get('/orders/{order}', [OrderController::class, 'show']);
 Route::post('/orders/{order}/complete', [OrderController::class, 'complete']);
 
+// Cashier: pencarian & pendaftaran pelanggan saat transaksi
+Route::get('/customers', [CustomerController::class, 'search']);
+Route::post('/customers', [CustomerController::class, 'store']);
+
 // Kitchen KDS flow (per-menu item status)
 Route::get('/kitchen/items', [KitchenController::class, 'index']);
 Route::patch('/kitchen/items/{item}/status', [KitchenController::class, 'updateItemStatus']);

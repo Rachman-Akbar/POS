@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ChartOfAccount;
 use App\Models\JournalDetail;
 use App\Models\JournalEntry;
+use App\Models\PaymentMethod;
 use App\Models\SalesInvoice;
 use App\Models\SalesReceipt;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,8 @@ class AccountingService
     public const ACCOUNT_BANK = '1310';
 
     public const ACCOUNT_QRIS = '1320';
+
+    public const ACCOUNT_EWALLET = '1330';
 
     public const ACCOUNT_PPN_OUT = '2500';
 
@@ -70,19 +73,13 @@ class AccountingService
     /**
      * Post the journal entry when a sales receipt (payment) is received.
      *
-     * Debit  Kas / Bank / QRIS                     net_amount
+     * Debit  Kas / Bank / QRIS / Dompet Digital      net_amount
      * Debit  Biaya MDR / Admin                     mdr_fee
      * Credit Piutang Usaha                                         gross_amount
      */
     public function postSalesReceipt(SalesReceipt $receipt): JournalEntry
     {
         return DB::transaction(function () use ($receipt) {
-            $account = match ($receipt->payment_method) {
-                'bank' => self::ACCOUNT_BANK,
-                'qris' => self::ACCOUNT_QRIS,
-                default => self::ACCOUNT_CASH,
-            };
-
             $entry = JournalEntry::create([
                 'number' => $this->nextNumber('RCT'),
                 'type' => 'sales_receipt',
@@ -92,7 +89,7 @@ class AccountingService
                 'reference_id' => $receipt->id,
             ]);
 
-            $this->postLine($entry, $account, $receipt->net_amount, 0.0);
+            $this->postLine($entry, $this->settlementAccountFor($receipt), $receipt->net_amount, 0.0);
             if ($receipt->mdr_fee > 0) {
                 $this->postLine($entry, self::ACCOUNT_MDR, $receipt->mdr_fee, 0.0);
             }
@@ -100,6 +97,27 @@ class AccountingService
 
             return $entry->load('details');
         });
+    }
+
+    /**
+     * Which balance sheet account a payment method settles into.
+     *
+     * Routing follows the method's `type` so every channel (bca, gopay, dana,
+     * ...) lands on the right account instead of defaulting to cash. An unknown
+     * method is treated as cash, which is the safe default for a till.
+     */
+    private function settlementAccountFor(SalesReceipt $receipt): string
+    {
+        $type = PaymentMethod::query()
+            ->where('code', $receipt->payment_method)
+            ->value('type');
+
+        return match ($type) {
+            'bank' => self::ACCOUNT_BANK,
+            'qris' => self::ACCOUNT_QRIS,
+            'ewallet' => self::ACCOUNT_EWALLET,
+            default => self::ACCOUNT_CASH,
+        };
     }
 
     /**

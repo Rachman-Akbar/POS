@@ -29,6 +29,13 @@ class Customer extends Model
         'is_active',
     ];
 
+    /**
+     * Accessor ikut dikirim ke API agar tabel admin tidak menghitung ulang.
+     *
+     * @var array<int, string>
+     */
+    protected $appends = ['display_name', 'region'];
+
     protected $casts = [
         'customer_type' => CustomerType::class,
         'is_active' => 'boolean',

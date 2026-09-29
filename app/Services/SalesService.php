@@ -26,7 +26,7 @@ class SalesService
      * Create an order with its items, invoice, stock deduction and journal posting.
      *
      * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
-     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, payment_account_id?: int|null, paid_amount?: float|null, notes?: string|null}  $options
+     * @param  array{discount?: float, tax_rate?: float|null, payment_method?: string|null, payment_account_id?: int|null, paid_amount?: float|null, notes?: string|null, customer_id?: int|null}  $options
      */
     public function createOrder(?User $user, string $tableNumber, PaymentType $paymentType, array $items, array $options = []): Order
     {
@@ -34,6 +34,7 @@ class SalesService
             $order = Order::create([
                 'order_number' => $this->nextOrderNumber(),
                 'table_number' => $tableNumber ?: null,
+                'customer_id' => $options['customer_id'] ?? null,
                 'user_id' => $user?->id,
                 'payment_type' => $paymentType->value,
                 'status' => OrderStatus::Pending->value,

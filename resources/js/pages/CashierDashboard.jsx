@@ -11,6 +11,7 @@ import QrisQrCode from '../components/QrisQrCode';
 import CurrencyInput from '../components/CurrencyInput';
 import Price, { PriceRow } from '../components/Price';
 import SearchSelect from '../components/SearchSelect';
+import CashierCustomerPicker from '../components/cashier/CashierCustomerPicker';
 import { PayMethodBadge } from '../components/badges';
 import { api, formatIDR, parseNumber } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
@@ -36,6 +37,7 @@ export default function CashierDashboard() {
     const [submitting, setSubmitting] = useState(false);
     const [selected, setSelected] = useState({});
     const [collapsed, setCollapsed] = useState({});
+    const [customer, setCustomer] = useState(null);
 
     const { data: products = [] } = useQuery({
         queryKey: ['products'],
@@ -65,6 +67,7 @@ export default function CashierDashboard() {
     const enableTable = flags.cashier_enable_table ?? true;
     const enablePpn = flags.cashier_enable_ppn ?? true;
     const enablePrepay = flags.cashier_enable_prepay ?? false;
+    const enableCustomer = flags.cashier_enable_customer ?? true;
     const taxRate = Number(settings?.ppn_rate ?? 11);
     const tableNumbers = settings?.table_numbers ?? Array.from({ length: 20 }, (_, i) => String(i + 1));
 
@@ -175,6 +178,7 @@ export default function CashierDashboard() {
         setPaidRaw('');
         setPaidTouched(false);
         setPayOpen(false);
+        setCustomer(null);
     };
 
     /**
@@ -198,6 +202,7 @@ export default function CashierDashboard() {
                 tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
                 payment_method: paymentType === 'pay_now' ? paymentMethod : undefined,
                 paid_amount: paymentType === 'pay_now' ? paid : undefined,
+                customer_id: customer?.id,
                 items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
             });
             resetCheckout();
@@ -229,11 +234,15 @@ export default function CashierDashboard() {
     };
 
     const printReceipt = (order) => {
+        const customerLabel = order.customer
+            ? order.customer.company_name || order.customer.name
+            : 'Umum';
         const text = [
             `======= STRUK - ${settings?.store_name ?? 'POS'} =======`,
             `No Faktur : ${order.invoice?.invoice_number ?? '-'}`,
             `No Pesanan: ${order.order_number}`,
             `Meja      : ${order.table_number ?? '-'}`,
+            `Pelanggan : ${customerLabel}`,
             '---------------------------',
             ...order.items.map((it) => `${it.qty} x ${it.product?.name}`),
             '---------------------------',
@@ -280,6 +289,9 @@ export default function CashierDashboard() {
             table={table}
             setTable={setTable}
             enableTable={enableTable}
+            enableCustomer={enableCustomer}
+            customer={customer}
+            onCustomerChange={setCustomer}
             tableNumbers={tableNumbers}
             discountType={discountType}
             setDiscountType={setDiscountType}
@@ -754,6 +766,7 @@ function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, se
 function CheckoutPanel({
     cart, products = [], updateQty, removeLine,
     table, setTable, enableTable, tableNumbers,
+    enableCustomer, customer, onCustomerChange,
     discountType, setDiscountType, discountRaw, setDiscountRaw,
     enablePpn, taxRate, enablePrepay,
     paymentMethod, onPaymentMethodChange, payMethods, defaultAccount, qrisId,
@@ -812,6 +825,10 @@ function CheckoutPanel({
                                     <p className="text-[11px] text-negative mt-1 flex items-center gap-1"><AlertCircle size={11} /> Nomor meja wajib dipilih sebelum menyimpan pembayaran.</p>
                                 )}
                             </div>
+                        )}
+
+                        {enableCustomer && (
+                            <CashierCustomerPicker selected={customer} onChange={onCustomerChange} />
                         )}
 
                         <div>

@@ -23,6 +23,7 @@ const FLAG_META = [
     { key: 'cashier_show_favorites', label: 'Produk Favorit', icon: Star, desc: 'Tampilkan atau sembunyikan bagian produk favorit di katalog kasir.' },
     { key: 'cashier_show_stock', label: 'Stok Produk', icon: Package, desc: 'Tampilkan atau sembunyikan jumlah stok pada kartu produk.' },
     { key: 'cashier_enable_table', label: 'Input Nomor Meja', icon: Hash, desc: 'Aktifkan kewajiban memilih nomor meja saat transaksi.' },
+    { key: 'cashier_enable_customer', label: 'Data Pelanggan', icon: User, desc: 'Tampilkan pemilih pelanggan (perorangan / badan usaha) di panel kasir.' },
     { key: 'cashier_enable_ppn', label: 'Penerapan PPN', icon: Percent, desc: 'Terapkan pajak PPN pada setiap transaksi kasir.' },
     { key: 'cashier_enable_prepay', label: 'Sistem Bayar Di Muka', icon: Wallet, desc: 'Izinkan status pembayaran di muka (seluruh uang diterima sebelum transaksi disimpan).' },
 ];
