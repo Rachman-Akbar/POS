@@ -137,16 +137,20 @@ class CustomerController extends Controller
         $data = $request->validate([
             'customer_type' => ['required', Rule::in(CustomerType::values())],
             'name' => ['required', 'string', 'max:120'],
-            'email' => ['required', 'string', 'email:rfc', 'max:190', Rule::unique('customers', 'email')->ignore($customer?->id)],
-            'phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+()\-\s]+$/'],
+            // Satu-satunya field wajib adalah nama. Form pelanggan di kasir
+            // sengaja tidak memaksa apa pun yang lain: banyak pelanggan dine-in
+            // hanya diketahui namanya, dan data yang belum ada lebih mudah
+            // dilengkapi belakangan daripada menghambat transaksi.
+            'email' => ['nullable', 'string', 'email:rfc', 'max:190', Rule::unique('customers', 'email')->ignore($customer?->id)],
+            'phone' => ['nullable', 'string', 'max:30', 'regex:/^[0-9+()\-\s]+$/'],
             'address' => ['nullable', 'string', 'max:2000'],
-            'company_name' => ['nullable', 'required_if:customer_type,business', 'string', 'max:180'],
-            'nik' => ['nullable', 'required_if:customer_type,business', 'string', 'regex:/^[0-9]{16}$/'],
-            'npwp' => ['nullable', 'required_if:customer_type,business', 'string', 'max:32', 'regex:/^[0-9.\-]+$/'],
-            'province' => ['nullable', 'required_if:customer_type,business', 'string', 'max:120'],
-            'city' => ['nullable', 'required_if:customer_type,business', 'string', 'max:120'],
-            'postal_code' => ['nullable', 'required_if:customer_type,business', 'string', 'max:16', 'regex:/^[0-9A-Za-z\-\s]{3,16}$/'],
-            'country' => ['nullable', 'required_if:customer_type,business', 'string', 'max:100'],
+            'company_name' => ['nullable', 'string', 'max:180'],
+            'nik' => ['nullable', 'string', 'regex:/^[0-9]{16}$/'],
+            'npwp' => ['nullable', 'string', 'max:32', 'regex:/^[0-9.\-]+$/'],
+            'province' => ['nullable', 'string', 'max:120'],
+            'city' => ['nullable', 'string', 'max:120'],
+            'postal_code' => ['nullable', 'string', 'max:16', 'regex:/^[0-9A-Za-z\-\s]{3,16}$/'],
+            'country' => ['nullable', 'string', 'max:100'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'is_active' => ['sometimes', 'boolean'],
         ], [

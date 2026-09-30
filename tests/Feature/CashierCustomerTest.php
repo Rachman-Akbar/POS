@@ -171,19 +171,39 @@ class CashierCustomerTest extends TestCase
             ->assertJsonPath('data.company_name', 'PT Nusantara Jaya Sentosa');
     }
 
-    public function test_business_customer_requires_company_fields(): void
+    /**
+     * Badan usaha boleh disimpan walau data perusahaannya belum ada. Kasir
+     * sering mencatat pelanggan yang baru seperlunya; data NPWP/NIK bisa
+     * menyusul dari menu admin tanpa memblokir penjualan.
+     */
+    public function test_business_customer_can_be_registered_with_only_a_name(): void
     {
         $response = $this->actingAs($this->cashier)->postJson('/api/customers', [
             'customer_type' => CustomerType::Business->value,
             'name' => 'Tanpa Company',
-            'email' => 'tanpa.company@example.com',
-            'phone' => '081234567892',
         ]);
 
-        $response->assertStatus(422)
-            ->assertJsonValidationErrors(['company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country']);
+        $response->assertCreated()
+            ->assertJsonPath('data.customer_type', CustomerType::Business->value)
+            ->assertJsonPath('data.name', 'Tanpa Company')
+            ->assertJsonPath('data.company_name', null);
 
-        $this->assertDatabaseCount('customers', 0);
+        $this->assertDatabaseHas('customers', [
+            'name' => 'Tanpa Company',
+            'customer_type' => CustomerType::Business->value,
+            'company_name' => null,
+        ]);
+    }
+
+    /** Value yang tidak valid tetap ditolak walau field-nya opsional. */
+    public function test_optional_customer_fields_are_still_validated_when_filled(): void
+    {
+        $this->actingAs($this->cashier)->postJson('/api/customers', [
+            'customer_type' => CustomerType::Business->value,
+            'name' => 'Email Cacat',
+            'email' => 'bukan-email',
+            'nik' => '123',
+        ])->assertJsonValidationErrors(['email', 'nik']);
     }
 
     public function test_customer_creation_rejects_invalid_nik_and_duplicate_email(): void
@@ -281,6 +301,47 @@ class CashierCustomerTest extends TestCase
             'company_name' => 'PT Nusantara Jaya',
             'customer_type' => CustomerType::Business->value,
         ]);
+    }
+
+    /**
+     * Form cepat di layar kasir hanya menanyakan nama; email dan telepon
+     * boleh dikosongkan dan dilengkapi nanti dari menu admin. Banyak pelanggan
+     * dine-in tidak punya email sama sekali, jadi mewajibkannya di kasir hanya
+     * memperlambat.
+     */
+    public function test_individual_customer_can_be_registered_with_only_a_name(): void
+    {
+        $response = $this->actingAs($this->cashier)->postJson('/api/customers', [
+            'customer_type' => CustomerType::Individual->value,
+            'name' => 'Budi Santoso',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.name', 'Budi Santoso')
+            ->assertJsonPath('data.email', null)
+            ->assertJsonPath('data.phone', null);
+
+        $this->assertDatabaseHas('customers', [
+            'name' => 'Budi Santoso',
+            'email' => null,
+            'phone' => null,
+        ]);
+    }
+
+    /**
+     * Banyak pelanggan tanpa email tidak boleh saling bentrok: kolom email
+     * masih unique, jadi null harus tetap bisa dipakai lebih dari sekali.
+     */
+    public function test_several_customers_can_have_no_email_at_all(): void
+    {
+        foreach (['Budi Santoso', 'Ani Lestari', 'Citra Dewi'] as $name) {
+            $this->actingAs($this->cashier)->postJson('/api/customers', [
+                'customer_type' => CustomerType::Individual->value,
+                'name' => $name,
+            ])->assertCreated();
+        }
+
+        $this->assertSame(3, Customer::whereNull('email')->count());
     }
 
     public function test_customer_search_matches_name_and_phone(): void

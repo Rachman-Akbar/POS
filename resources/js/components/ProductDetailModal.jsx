@@ -44,17 +44,25 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
                 className="bg-surface rounded-2xl w-full max-w-md overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
             >
-                <ProductImage product={product} className="w-full aspect-[4/3] object-cover" />
+                {/* X ditempel di pojok kanan atas gambar supaya tidak memakan
+                    tinggi isi modal dan tidak menabrakkan diri dengan judul
+                    produk yang bisa panjang. */}
+                <div className="relative">
+                    <ProductImage product={product} className="w-full aspect-[4/3] object-cover" />
+                    <button
+                        onClick={onClose}
+                        title="Tutup"
+                        aria-label="Tutup detail produk"
+                        className="absolute top-2 right-2 btn-icon !w-8 !h-8 !rounded-full bg-black/55 text-white hover:bg-black/75 backdrop-blur-sm transition-colors"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
 
                 <div className="p-5">
-                    <div className="flex items-start justify-between gap-3 mb-1">
-                        <div>
-                            <span className="text-[11px] font-semibold text-muted uppercase tracking-wide">{product.category ?? 'Lainnya'}</span>
-                            <h3 className="text-lg font-bold leading-snug">{product.name}</h3>
-                        </div>
-                        <button onClick={onClose} className="btn-icon w-9 h-9 text-muted hover:bg-surface-3">
-                            <X size={18} />
-                        </button>
+                    <div className="mb-1">
+                        <span className="text-[11px] font-semibold text-muted uppercase tracking-wide">{product.category ?? 'Lainnya'}</span>
+                        <h3 className="text-lg font-bold leading-snug">{product.name}</h3>
                     </div>
 
                     <div className="flex items-center gap-2 mt-2 mb-3">
@@ -90,11 +98,6 @@ export default function ProductDetailModal({ product, onClose, onAdd }) {
                         </button>
                     </div>
 
-                    {!outOfStock && (
-                        <p className="text-[11px] text-muted mt-2 text-right">
-                            Tekan <kbd className="px-1.5 py-0.5 rounded bg-surface-2 font-semibold text-content">Enter</kbd> untuk masukkan keranjang
-                        </p>
-                    )}
                 </div>
             </div>
         </div>

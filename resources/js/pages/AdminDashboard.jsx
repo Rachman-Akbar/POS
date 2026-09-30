@@ -26,6 +26,7 @@ const METHOD_TYPE_META = {
 const FLAG_META = [
     { key: 'cashier_show_favorites', label: 'Produk Favorit', icon: Star, desc: 'Tampilkan atau sembunyikan bagian produk favorit di katalog kasir.' },
     { key: 'cashier_show_stock', label: 'Stok Produk', icon: Package, desc: 'Tampilkan atau sembunyikan jumlah stok pada kartu produk.' },
+    { key: 'cashier_show_sku', label: 'Kode Barang', icon: Hash, desc: 'Tampilkan atau sembunyikan kode barang (SKU) pada menu produk kasir.' },
     { key: 'cashier_enable_table', label: 'Input Nomor Meja', icon: Hash, desc: 'Aktifkan kewajiban memilih nomor meja saat transaksi.' },
     { key: 'cashier_enable_customer', label: 'Data Pelanggan', icon: User, desc: 'Tampilkan pemilih pelanggan (perorangan / badan usaha) di panel kasir.' },
     { key: 'cashier_enable_ppn', label: 'Penerapan PPN', icon: Percent, desc: 'Terapkan pajak PPN pada setiap transaksi kasir.' },

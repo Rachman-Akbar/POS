@@ -425,21 +425,22 @@ class TransactionCorrectionTest extends TestCase
         $this->assertSame(2, $order->fresh()->items()->firstOrFail()->qty);
     }
 
-    public function test_correction_requires_a_note(): void
+    public function test_correction_note_is_optional_and_keeps_previous_notes(): void
     {
         $order = $this->paidOrder();
+        $order->update(['notes' => 'Pelanggan minta cepat']);
 
         Sanctum::actingAs($this->corrector());
 
-        // Tanpa catatan, koreksi tidak bisa ditelusuri: orang yang membaca
-        // audit log tidak akan pernah tahu apa yang sebenarnya salah.
+        // Catatan koreksi boleh dikosongkan: kasir sering memperbaiki angka atau
+        // meja saja. Catatan lama tidak boleh hilang karena koreksi berikutnya
+        // tidak menyertakan catatan baru.
         $this->putJson("/api/orders/{$order->id}/corrections", [
             'items' => [['product_id' => Product::firstOrFail()->id, 'qty' => 1]],
-        ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('notes');
+        ])->assertOk();
 
-        $this->assertSame(2, $order->fresh()->items()->firstOrFail()->qty);
+        $this->assertSame(1, $order->fresh()->items()->firstOrFail()->qty);
+        $this->assertSame('Pelanggan minta cepat', (string) $order->fresh()->notes);
     }
 
     public function test_correction_discount_requires_the_discount_permission(): void

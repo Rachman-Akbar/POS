@@ -1,4 +1,4 @@
-import { Banknote, ChevronDown, CreditCard, Landmark, QrCode, Wallet } from 'lucide-react';
+import { ChevronDown, QrCode, Wallet } from 'lucide-react';
 import CurrencyInput from '../CurrencyInput';
 import { PriceRow } from '../Price';
 import QrisQrCode from '../QrisQrCode';
@@ -18,18 +18,38 @@ import QrisQrCode from '../QrisQrCode';
 export const TOTAL_VALUE = 'w-36 shrink-0';
 
 /**
- * Cangkang panel transaksi untuk sidebar kanan.
+ * Cangkang panel transaksi untuk kolom kanan.
  *
  * Dipakai bersama oleh "Cek Pesanan" dan "Detail Pesanan" supaya keduanya
  * punya geometri yang identik: menempel di bawah header, tinggi dibatasi
  * terhadap viewport, dan isi panjang digulir di dalam panel — bukan terpotong
  * di luar layar. Judulnya ikut menempel agar tetap terlihat saat digulir.
+ *
+ * Sengaja tanpa `card`: kolom kanan halaman kasir tidak memakai garis atau
+ * sudut membulat, hanya jarak 2px dari kolom menu. `min-w-0` mencegah
+ * isi yang lebar (baris tabel, QRIS) memaksa kolom ini melebar dan menabrak
+ * katalog saat layar digeser ke kanan.
  */
-export function TransactionCard({ title, icon: Icon, actions, children }) {
+/**
+ * Kolom transaksi.
+ *
+ * Default (`fill` belum aktif): panel ikut tinggi halaman dengan `sticky`,
+ * dipakai halaman detail pesanan yang layout-nya satu kolom.
+ *
+ * `fill` dipakai layar kasir, yang kolomnya sudah dikunci setinggi layar dan
+ * digulirnya ditangani oleh induknya. Tanpa mode ini, panel punya scroller
+ * sendiri sementara halaman ikut tergulir, jadi menggulir transaksi ikut
+ * menyeret kolom menu.
+ */
+export function TransactionCard({ title, icon: Icon, actions, fill = false, children }) {
+    const shell = fill
+        ? 'min-w-0 bg-surface p-[3px]'
+        : 'min-w-0 bg-surface p-[3px] sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden scrollbar-thin';
+
     return (
-        <div className="card sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin">
-            <div className="sticky top-0 z-10 bg-surface flex items-center justify-between gap-2 pb-3">
-                <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
+        <div className={shell}>
+            <div className="sticky top-0 z-10 bg-surface flex items-center justify-between gap-1 p-[3px] pb-[3px]">
+                <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-1">
                     {Icon ? <Icon size={16} /> : null} {title}
                 </h3>
                 {actions}
@@ -40,21 +60,27 @@ export function TransactionCard({ title, icon: Icon, actions, children }) {
     );
 }
 
-const METHOD_ICONS = { kas: Banknote, bank: Landmark, qris: QrCode };
-
 /**
- * Pilihan metode pembayaran berbentuk chip.
+ * Pilihan metode pembayaran.
+ *
+ * Tanpa icon dan tanpa border/background: yang tidak aktif hanya teks redup,
+ * yang aktif menyala. Label "Metode" juga dihapus di pemanggil karena pilihan
+ * ini sudah jelas dari isinya.
  */
 export function MethodChip({ method, active, onClick }) {
-    const Icon = METHOD_ICONS[method.type] ?? METHOD_ICONS[method.code] ?? CreditCard;
     return (
         <button
+            type="button"
             onClick={onClick}
-            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                active ? 'bg-accent text-on-accent' : 'bg-surface-3 text-muted hover:bg-surface-3/70'
+            aria-pressed={active}
+            title={method.name}
+            className={`whitespace-nowrap px-2 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                active
+                    ? 'bg-accent text-on-accent'
+                    : 'text-muted hover:text-content hover:bg-surface-2'
             }`}
         >
-            <Icon size={14} /> {method.name}
+            {method.name}
         </button>
     );
 }

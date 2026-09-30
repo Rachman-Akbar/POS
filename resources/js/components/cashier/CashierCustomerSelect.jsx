@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, Check, Search, User, UserPlus, Users, X } from 'lucide-react';
 import { api } from '../../api/client';
@@ -6,15 +6,15 @@ import { useClickOutside } from '../../hooks/useClickOutside';
 import { notifyError, notifySuccess } from '../../utils/alerts';
 import FormModal, { Field, FieldRow } from '../admin/FormModal';
 
-const CUSTOMER_TYPES = [
-    { key: 'individual', label: 'Perorangan', icon: User },
-    { key: 'business', label: 'Perusahaan', icon: Building2 },
-];
-
-const BUSINESS_FIELDS = ['company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country'];
-
 const WALK_IN_LABEL = 'Pelanggan Umum';
 
+/**
+ * Bentuk form pelanggan baru.
+ *
+ * Semua field ikut dikirim supaya kasir bisa mengisi yang memang diketahuinya
+ * di tempat — tidak perlu pindah ke menu admin dulu. Yang wajib hanya nama:
+ * field lain boleh kosong dan dilengkapi belakangan.
+ */
 const EMPTY_FORM = {
     customer_type: 'individual',
     name: '',
@@ -29,6 +29,11 @@ const EMPTY_FORM = {
     postal_code: '',
     country: 'Indonesia',
 };
+
+const CUSTOMER_TYPES = [
+    { key: 'individual', label: 'Perorangan', icon: User },
+    { key: 'business', label: 'Perusahaan', icon: Building2 },
+];
 
 function displayName(customer) {
     return customer.company_name || customer.name;
@@ -64,6 +69,10 @@ export default function CashierCustomerSelect({ selected, onChange }) {
     const [form, setForm] = useState(null);
     const [errors, setErrors] = useState({});
     const [needle, setNeedle] = useState('');
+    // Indeks opsi yang sedang disorot saat memakai keyboard. -1 berarti belum
+    // ada yang dipilih, jadi Enter pertama kali menyorot opsi teratas.
+    const [activeIndex, setActiveIndex] = useState(-1);
+    const listRef = useRef(null);
     const ref = useClickOutside(() => setOpen(false));
 
     // Debounce agar tiap ketikan tidak langsung menembak API.
@@ -83,6 +92,80 @@ export default function CashierCustomerSelect({ selected, onChange }) {
     const exactMatch = results.some(
         (customer) => displayName(customer).toLowerCase() === needle.toLowerCase(),
     );
+
+    /** Opsi "Daftarkan sebagai pelanggan baru" hanya muncul kalau ada teks
+     *  yang diketik dan tidak sama persis dengan pelanggan yang ada. */
+    const canCreate = Boolean(needle) && !exactMatch;
+
+    // Urutan ini harus sama dengan urutan tombol di dropdown.
+    const options = [
+        { kind: 'walkin' },
+        ...results.map((customer) => ({ kind: 'customer', customer })),
+        ...(canCreate ? [{ kind: 'create' }] : []),
+    ];
+
+    const applyOption = (option) => {
+        if (!option) return;
+        if (option.kind === 'walkin') onChange(null);
+        else if (option.kind === 'customer') onChange(option.customer);
+        else openForm(needle);
+        setTerm('');
+        setNeedle('');
+        setOpen(false);
+        setActiveIndex(-1);
+    };
+
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            if (open) {
+                event.preventDefault();
+                setOpen(false);
+                setActiveIndex(-1);
+            }
+            return;
+        }
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) {
+                setOpen(true);
+                setActiveIndex(0);
+                return;
+            }
+            if (options.length === 0) return;
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            setActiveIndex((current) => {
+                const next = current < 0
+                    ? (step === 1 ? 0 : options.length - 1)
+                    : (current + step + options.length) % options.length;
+                return next;
+            });
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            // Enter saat mengetik nama baru: langsung buka form pendaftaran
+            // supaya kasir tidak perlu melepas fokus ke dropdown dulu.
+            if (!open && canCreate) {
+                event.preventDefault();
+                openForm(needle);
+                setOpen(false);
+                setActiveIndex(-1);
+                return;
+            }
+            if (!open) return;
+            event.preventDefault();
+            applyOption(options[activeIndex] ?? options[0]);
+        }
+    };
+
+    // Sorotan keyboard ikut ter-scroll supaya opsi aktif tidak keluar layar.
+    useEffect(() => {
+        if (activeIndex < 0) return;
+        listRef.current
+            ?.querySelector(`[data-option-index="${activeIndex}"]`)
+            ?.scrollIntoView({ block: 'nearest' });
+    }, [activeIndex]);
 
     const createCustomer = useMutation({
         mutationFn: (payload) => api.post('/customers', payload),
@@ -104,178 +187,158 @@ export default function CashierCustomerSelect({ selected, onChange }) {
     const openForm = (prefillName = '') =>
         setForm({ ...EMPTY_FORM, name: prefillName });
 
-    const setFormType = (value) =>
-        setForm((current) => ({
-            ...current,
-            customer_type: value,
-            ...(value === 'individual'
-                ? Object.fromEntries(BUSINESS_FIELDS.map((key) => [key, '']))
-                : {}),
-        }));
-
+    /**
+     * Kirim hanya field yang benar-benar diisi, supaya kolom opsional tidak
+     * tertimpa string kosong yang berbeda maknanya dari "tidak diisi".
+     */
     const submitForm = () => {
         const payload = {
             customer_type: form.customer_type,
             ...Object.fromEntries(
-                Object.entries(form).filter(([, value]) => String(value ?? '').trim() !== ''),
+                Object.entries(form)
+                    .filter(([key, value]) => key !== 'customer_type' && String(value ?? '').trim() !== '')
+                    .map(([key, value]) => [key, value.trim()]),
             ),
         };
 
         createCustomer.mutate(payload);
     };
 
-    const canSubmit = form
-        ? form.customer_type === 'business'
-            ? ['name', 'email', 'phone', ...BUSINESS_FIELDS].every((key) =>
-                  String(form[key] ?? '').trim(),
-              )
-            : ['name', 'email', 'phone'].every((key) => String(form[key] ?? '').trim())
-        : false;
+    const setFormType = (value) =>
+        setForm((current) => ({ ...current, customer_type: value }));
+
+    const canSubmit = form ? form.name.trim() !== '' : false;
 
     return (
         <div>
-            <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="label !mb-0">Pelanggan</span>
-                {selected && (
-                    <button
-                        type="button"
-                        onClick={() => onChange(null)}
-                        className="text-[11px] font-semibold text-negative hover:underline cursor-pointer"
-                    >
-                        Lepas
-                    </button>
-                )}
-            </div>
-
-            <div className="relative" ref={ref}>
-                <Search
-                    size={15}
-                    className="text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
-                />
-                <input
-                    className="input !pl-9 !pr-8"
-                    value={open ? term : selected ? displayName(selected) : WALK_IN_LABEL}
-                    onFocus={() => {
-                        setOpen(true);
-                        if (selected) setTerm('');
-                    }}
-                    onChange={(event) => {
-                        setTerm(event.target.value);
-                        setOpen(true);
-                    }}
-                    onKeyDown={(event) => {
-                        if (event.key === 'Escape') setOpen(false);
-                    }}
-                    placeholder="Cari nama atau telepon..."
-                />
-                {(selected || needle) && (
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (selected) onChange(null);
-                            setTerm('');
-                            setOpen(true);
-                        }}
-                        title="Hapus pilihan"
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-content cursor-pointer"
-                    >
-                        <X size={14} />
-                    </button>
-                )}
-
-                {open && (
-                    <div className="absolute left-0 right-0 top-12 max-h-72 overflow-y-auto scrollbar-thin bg-surface rounded-xl shadow-xl z-40 py-1">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                onChange(null);
-                                setTerm('');
-                                setOpen(false);
+            <div className="flex items-center gap-1">
+                <span className="label !mb-0 w-20 shrink-0">Pelanggan</span>
+                <div className="flex-1 min-w-0">
+                    <div className="relative" ref={ref}>
+                        <Search
+                            size={15}
+                            className="text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
+                        />
+                        <input
+                            className="input !pl-9 !pr-8 !py-1.5"
+                            value={open ? term : selected ? displayName(selected) : WALK_IN_LABEL}
+                            onFocus={() => {
+                                setOpen(true);
+                                setActiveIndex(-1);
+                                if (selected) setTerm('');
                             }}
-                            className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left cursor-pointer transition-colors ${
-                                !selected ? 'bg-accent-soft text-accent-ink font-semibold' : 'hover:bg-surface-2'
-                            }`}
-                        >
-                            <Users size={14} className="shrink-0" />
-                            {WALK_IN_LABEL}
-                            {!selected && <Check size={14} className="ml-auto" />}
-                        </button>
+                            onChange={(event) => {
+                                setTerm(event.target.value);
+                                setOpen(true);
+                                setActiveIndex(-1);
+                            }}
+                            onKeyDown={onKeyDown}
+                            placeholder="Cari nama..."
+                        />
+                        {(selected || needle) && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (selected) onChange(null);
+                                    setTerm('');
+                                    setOpen(true);
+                                }}
+                                title="Hapus pilihan"
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-content cursor-pointer"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
 
-                        {isFetching ? (
-                            <p className="text-xs text-muted text-center py-3">Mencari...</p>
-                        ) : (
-                            results.map((customer) => (
+                        {open && (
+                            <div ref={listRef} className="absolute left-0 right-0 top-10 max-h-72 overflow-y-auto scrollbar-thin bg-surface rounded-xl shadow-xl z-40 py-1">
                                 <button
-                                    key={customer.id}
                                     type="button"
-                                    onClick={() => {
-                                        onChange(customer);
-                                        setTerm('');
-                                        setOpen(false);
-                                    }}
-                                    className={`w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer transition-colors ${
-                                        selected?.id === customer.id
-                                            ? 'bg-accent-soft text-accent-ink font-semibold'
-                                            : 'hover:bg-surface-2'
+                                    data-option-index="0"
+                                    onMouseEnter={() => setActiveIndex(0)}
+                                    onClick={() => applyOption({ kind: 'walkin' })}
+                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-left cursor-pointer transition-colors ${
+                                        activeIndex === 0 || !selected
+                                        ? 'bg-accent-soft text-accent-ink font-semibold'
+                                        : 'hover:bg-surface-2'
                                     }`}
                                 >
-                                    <TypeIcon customer={customer} />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block text-sm font-semibold truncate">
-                                            {displayName(customer)}
-                                        </span>
-                                        <span className="block text-[11px] opacity-70 truncate">
-                                            {displayDetail(customer)}
-                                        </span>
-                                    </span>
-                                    {selected?.id === customer.id && <Check size={14} className="shrink-0" />}
+                                    <Users size={14} className="shrink-0" />
+                                    {WALK_IN_LABEL}
+                                    {!selected && <Check size={14} className="ml-auto" />}
                                 </button>
-                            ))
-                        )}
 
-                        {needle && !exactMatch && (
-                            <>
-                                <div className="border-t border-line my-1" />
-                                <button
-                                    type="button"
-                                    onClick={() => openForm(needle)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left font-semibold text-accent-ink hover:bg-accent-soft transition-colors cursor-pointer"
-                                >
-                                    <UserPlus size={14} className="shrink-0" />
-                                    <span className="truncate">Daftarkan &ldquo;{needle}&rdquo; sebagai pelanggan baru</span>
-                                </button>
-                            </>
+                                {isFetching ? (
+                                    <p className="text-xs text-muted text-center py-2">Mencari...</p>
+                                ) : (
+                                    results.map((customer, index) => (
+                                        <button
+                                            key={customer.id}
+                                            type="button"
+                                            data-option-index={index + 1}
+                                            onMouseEnter={() => setActiveIndex(index + 1)}
+                                            onClick={() => applyOption({ kind: 'customer', customer })}
+                                            className={`w-full flex items-center gap-2 px-2 py-1.5 text-left cursor-pointer transition-colors ${
+                                                activeIndex === index + 1 || selected?.id === customer.id
+                                                    ? 'bg-accent-soft text-accent-ink font-semibold'
+                                                    : 'hover:bg-surface-2'
+                                            }`}
+                                        >
+                                            <TypeIcon customer={customer} />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block text-sm font-semibold truncate">
+                                                    {displayName(customer)}
+                                                </span>
+                                                <span className="block text-[11px] opacity-70 truncate">
+                                                    {displayDetail(customer)}
+                                                </span>
+                                            </span>
+                                            {selected?.id === customer.id && <Check size={14} className="shrink-0" />}
+                                        </button>
+                                    ))
+                                )}
+
+                                {canCreate && (
+                                    <>
+                                        <div className="border-t border-line my-px" />
+                                        <button
+                                            type="button"
+                                            data-option-index={options.length - 1}
+                                            onMouseEnter={() => setActiveIndex(options.length - 1)}
+                                            onClick={() => applyOption({ kind: 'create' })}
+                                            className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-left font-semibold transition-colors cursor-pointer ${activeIndex === options.length - 1 ? 'bg-accent-soft text-accent-ink' : 'text-accent-ink hover:bg-accent-soft'}`}
+                                        >
+                                            <UserPlus size={14} className="shrink-0" />
+                                            <span className="truncate">Daftarkan &ldquo;{needle}&rdquo; sebagai pelanggan baru</span>
+                                        </button>
+                                    </>
+                                )}
+                            </div>
                         )}
                     </div>
-                )}
-            </div>
+                </div>
 
-            {!open && !selected && (
-                <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1">
-                    <Users size={11} className="shrink-0" /> Pesanan tanpa nama pelanggan, tidak tersimpan di master.
-                </p>
-            )}
+            </div>
 
             {form && (
                 <FormModal
                     title="Pelanggan Baru"
-                    subtitle="Data tersimpan ke master pelanggan."
                     width="max-w-2xl"
                     onClose={() => setForm(null)}
                     onSubmit={submitForm}
                     pending={createCustomer.isPending}
                     disabled={!canSubmit}
                 >
-                    <div className="space-y-3">
+                    <div className="space-y-1">
                         <div>
                             <span className="label">Tipe Pelanggan</span>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-2 gap-1">
                                 {CUSTOMER_TYPES.map((item) => (
                                     <button
                                         key={item.key}
                                         type="button"
                                         onClick={() => setFormType(item.key)}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                                             form.customer_type === item.key
                                                 ? 'bg-accent-soft text-accent-ink'
                                                 : 'bg-surface-2 text-muted hover:bg-surface-3'
@@ -287,93 +350,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                             </div>
                         </div>
 
-                        {form.customer_type === 'business' && (
-                            <>
-                                <Field label="Nama Perusahaan" error={errors.company_name}>
-                                    <input
-                                        className="input"
-                                        value={form.company_name}
-                                        onChange={(event) =>
-                                            setForm({ ...form, company_name: event.target.value })
-                                        }
-                                        placeholder="mis. PT Nusantara Jaya"
-                                    />
-                                </Field>
-                                <FieldRow>
-                                    <Field label="NIK Penanggung Jawab" error={errors.nik} hint="16 digit angka.">
-                                        <input
-                                            className="input"
-                                            inputMode="numeric"
-                                            maxLength={16}
-                                            value={form.nik}
-                                            onChange={(event) =>
-                                                setForm({
-                                                    ...form,
-                                                    nik: event.target.value.replace(/\D/g, ''),
-                                                })
-                                            }
-                                            placeholder="3273010101900001"
-                                        />
-                                    </Field>
-                                    <Field label="NPWP" error={errors.npwp}>
-                                        <input
-                                            className="input"
-                                            value={form.npwp}
-                                            onChange={(event) =>
-                                                setForm({ ...form, npwp: event.target.value })
-                                            }
-                                            placeholder="01.234.567.8-901.000"
-                                        />
-                                    </Field>
-                                </FieldRow>
-                                <FieldRow>
-                                    <Field label="Kota / Kabupaten" error={errors.city}>
-                                        <input
-                                            className="input"
-                                            value={form.city}
-                                            onChange={(event) => setForm({ ...form, city: event.target.value })}
-                                            placeholder="mis. Bandung"
-                                        />
-                                    </Field>
-                                    <Field label="Provinsi" error={errors.province}>
-                                        <input
-                                            className="input"
-                                            value={form.province}
-                                            onChange={(event) =>
-                                                setForm({ ...form, province: event.target.value })
-                                            }
-                                            placeholder="mis. Jawa Barat"
-                                        />
-                                    </Field>
-                                </FieldRow>
-                                <FieldRow>
-                                    <Field label="Kode Pos" error={errors.postal_code}>
-                                        <input
-                                            className="input"
-                                            value={form.postal_code}
-                                            onChange={(event) =>
-                                                setForm({ ...form, postal_code: event.target.value })
-                                            }
-                                            placeholder="40115"
-                                        />
-                                    </Field>
-                                    <Field label="Negara" error={errors.country}>
-                                        <input
-                                            className="input"
-                                            value={form.country}
-                                            onChange={(event) =>
-                                                setForm({ ...form, country: event.target.value })
-                                            }
-                                        />
-                                    </Field>
-                                </FieldRow>
-                            </>
-                        )}
-
-                        <Field
-                            label={form.customer_type === 'business' ? 'Nama Kontak' : 'Nama Lengkap'}
-                            error={errors.name}
-                        >
+                        <Field label="Nama" error={errors.name}>
                             <input
                                 className="input"
                                 value={form.name}
@@ -384,7 +361,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                         </Field>
 
                         <FieldRow>
-                            <Field label="Nomor HP" error={errors.phone}>
+                            <Field label="Nomor HP" error={errors.phone} hint="Opsional.">
                                 <input
                                     className="input"
                                     inputMode="tel"
@@ -393,7 +370,7 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                                     placeholder="0812 3456 7890"
                                 />
                             </Field>
-                            <Field label="Email" error={errors.email}>
+                            <Field label="Email" error={errors.email} hint="Opsional.">
                                 <input
                                     className="input"
                                     type="email"
@@ -404,12 +381,89 @@ export default function CashierCustomerSelect({ selected, onChange }) {
                             </Field>
                         </FieldRow>
 
-                        <Field label="Alamat" error={errors.address}>
+                        {form.customer_type === 'business' && (
+                            <>
+                                <Field label="Nama Perusahaan" error={errors.company_name} hint="Opsional.">
+                                    <input
+                                        className="input"
+                                        value={form.company_name}
+                                        onChange={(event) =>
+                                            setForm({ ...form, company_name: event.target.value })
+                                        }
+                                        placeholder="mis. PT Nusantara Jaya"
+                                    />
+                                </Field>
+
+                                <FieldRow>
+                                    <Field label="NIK Penanggung Jawab" error={errors.nik} hint="16 digit, opsional.">
+                                        <input
+                                            className="input"
+                                            inputMode="numeric"
+                                            maxLength={16}
+                                            value={form.nik}
+                                            onChange={(event) =>
+                                                setForm({ ...form, nik: event.target.value.replace(/\D/g, '') })
+                                            }
+                                            placeholder="3273010101900001"
+                                        />
+                                    </Field>
+                                    <Field label="NPWP" error={errors.npwp} hint="Opsional.">
+                                        <input
+                                            className="input"
+                                            value={form.npwp}
+                                            onChange={(event) => setForm({ ...form, npwp: event.target.value })}
+                                            placeholder="01.234.567.8-901.000"
+                                        />
+                                    </Field>
+                                </FieldRow>
+
+                                <FieldRow>
+                                    <Field label="Kota / Kabupaten" error={errors.city} hint="Opsional.">
+                                        <input
+                                            className="input"
+                                            value={form.city}
+                                            onChange={(event) => setForm({ ...form, city: event.target.value })}
+                                            placeholder="mis. Bandung"
+                                        />
+                                    </Field>
+                                    <Field label="Provinsi" error={errors.province} hint="Opsional.">
+                                        <input
+                                            className="input"
+                                            value={form.province}
+                                            onChange={(event) => setForm({ ...form, province: event.target.value })}
+                                            placeholder="mis. Jawa Barat"
+                                        />
+                                    </Field>
+                                </FieldRow>
+
+                                <FieldRow>
+                                    <Field label="Kode Pos" error={errors.postal_code} hint="Opsional.">
+                                        <input
+                                            className="input"
+                                            value={form.postal_code}
+                                            onChange={(event) =>
+                                                setForm({ ...form, postal_code: event.target.value })
+                                            }
+                                            placeholder="40115"
+                                        />
+                                    </Field>
+                                    <Field label="Negara" error={errors.country} hint="Opsional.">
+                                        <input
+                                            className="input"
+                                            value={form.country}
+                                            onChange={(event) => setForm({ ...form, country: event.target.value })}
+                                        />
+                                    </Field>
+                                </FieldRow>
+                            </>
+                        )}
+
+                        <Field label="Alamat" error={errors.address} hint="Opsional.">
                             <textarea
-                                className="input min-h-[60px] resize-y"
+                                className="input min-h-[50px] resize-y"
                                 value={form.address}
                                 onChange={(event) => setForm({ ...form, address: event.target.value })}
-                                placeholder="Alamat lengkap (opsional)"
+                                placeholder="Alamat lengkap"
                             />
                         </Field>
                     </div>

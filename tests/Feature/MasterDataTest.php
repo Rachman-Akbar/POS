@@ -247,16 +247,19 @@ class MasterDataTest extends TestCase
         $this->assertDatabaseMissing('customers', ['id' => $customer->id]);
     }
 
-    public function test_business_customers_require_company_fields(): void
+    /**
+     * Data badan usaha boleh kosong. Aturan "wajib nama saja" berlaku
+     * juga di menu admin, supaya kasir dan admin tidak punya syarat berbeda saat
+     * menyimpan pelanggan yang sama.
+     */
+    public function test_business_customers_only_require_a_name(): void
     {
         $this->postJson('/api/admin/customers', [
             'customer_type' => 'business',
             'name' => 'Siti Aminah',
-            'email' => 'siti@contoh.co.id',
-            'phone' => '081298765432',
-        ])->assertUnprocessable()->assertJsonValidationErrors([
-            'company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country',
-        ]);
+        ])->assertCreated()
+            ->assertJsonPath('data.customer_type', 'business')
+            ->assertJsonPath('data.company_name', null);
 
         $this->postJson('/api/admin/customers', [
             'customer_type' => 'business',

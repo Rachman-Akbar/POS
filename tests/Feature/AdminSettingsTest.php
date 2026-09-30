@@ -27,6 +27,7 @@ class AdminSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.cashier_show_favorites', true)
             ->assertJsonPath('data.cashier_show_stock', true)
+            ->assertJsonPath('data.cashier_show_sku', true)
             ->assertJsonPath('data.cashier_enable_ppn', true)
             ->assertJsonPath('data.cashier_enable_prepay', false);
     }
@@ -36,13 +37,16 @@ class AdminSettingsTest extends TestCase
         $this->putJson('/api/admin/settings', [
             'flags' => [
                 'cashier_show_stock' => false,
+                'cashier_show_sku' => false,
                 'cashier_enable_prepay' => true,
             ],
         ])->assertOk()
             ->assertJsonPath('data.cashier_show_stock', false)
+            ->assertJsonPath('data.cashier_show_sku', false)
             ->assertJsonPath('data.cashier_enable_prepay', true);
 
         $this->assertSame('false', Setting::get('pos.cashier_show_stock'));
+        $this->assertSame('false', Setting::get('pos.cashier_show_sku'));
         $this->assertSame('true', Setting::get('pos.cashier_enable_prepay'));
     }
 
@@ -52,6 +56,7 @@ class AdminSettingsTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.cashier.cashier_show_favorites', true)
+            ->assertJsonPath('data.cashier.cashier_show_sku', true)
             ->assertJsonIsArray('data.table_numbers');
 
         $tables = $response->json('data.table_numbers');

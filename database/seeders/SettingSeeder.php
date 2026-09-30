@@ -19,6 +19,7 @@ class SettingSeeder extends Seeder
             ['key' => 'pos.receipt_footer', 'group' => 'pos', 'value' => 'Terima kasih sudah berbelanja!', 'label' => 'Footer Struk'],
             ['key' => 'pos.cashier_show_favorites', 'group' => 'pos', 'value' => 'true', 'label' => 'Tampilkan Produk Favorit'],
             ['key' => 'pos.cashier_show_stock', 'group' => 'pos', 'value' => 'true', 'label' => 'Tampilkan Stok Produk'],
+            ['key' => 'pos.cashier_show_sku', 'group' => 'pos', 'value' => 'true', 'label' => 'Tampilkan Kode Barang'],
             ['key' => 'pos.cashier_enable_table', 'group' => 'pos', 'value' => 'true', 'label' => 'Input Nomor Meja'],
             ['key' => 'pos.cashier_enable_customer', 'group' => 'pos', 'value' => 'true', 'label' => 'Data Pelanggan (Perorangan / Badan Usaha)'],
             ['key' => 'pos.cashier_enable_ppn', 'group' => 'pos', 'value' => 'true', 'label' => 'Penerapan PPN'],

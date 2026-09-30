@@ -10,6 +10,9 @@ import { formatNumber } from '../api/client';
  *
  * `wrapperClassName` governs the outer wrapper that holds the awalan, sehingga
  * pemanggil bisa menata lebarunya di layout induk tanpa menimpa gaya input.
+ *
+ * `onKeyDown` diteruskan apa adanya supaya pemanggil bisa menambah pintasan
+ * keyboard (mis. Enter untuk mengonfirmasi nominal diskon).
  */
 export default function CurrencyInput({
     value = '',
@@ -19,6 +22,7 @@ export default function CurrencyInput({
     className = 'input',
     wrapperClassName = 'w-full',
     disabled = false,
+    onKeyDown,
 }) {
     const display = value ? formatNumber(value) : '';
 
@@ -28,6 +32,7 @@ export default function CurrencyInput({
             value={display}
             disabled={disabled}
             onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={onKeyDown}
             placeholder={placeholder}
             className={prefix ? `${className} pl-9` : className}
         />

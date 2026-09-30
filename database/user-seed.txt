@@ -39,12 +39,85 @@ KOREKSI TRANSAKSI (transaction.correct):
 - Fungsi: memperbaiki isi transaksi yang salah input (menu, jumlah, meja,
   diskon, PPN) lewat ikon koreksi pada kolom Aksi di tabel Pesanan, lalu
   disimpan ke endpoint PUT /api/orders/{order}/corrections.
-- Catatan koreksi WAJIB diisi (minimal 5 karakter), disimpan di catatan
-  transaksi dan tercatat di audit log. Pembayaran, stok, dan jurnal tidak
-  diubah — koreksi uang tetap lewat void/refund.
+- Catatan koreksi OPSIONAL: boleh dikosongkan. Kalau diisi, disimpan di
+  catatan transaksi (menyambung catatan lama) dan dicatat di audit log.
+  Pembayaran, stok, dan jurnal tidak diubah — koreksi uang tetap lewat
+  void/refund.
 - Diskon pada koreksi tetap butuh permission pos.discount.
 
+LAYAR KASIR (SEMUA HALAMAN):
+- Main container memakai padding 3px ke semua sisi, termasuk 3px ke dalam di
+  kiri dan kanan menuju tengah (1px terlalu mepet, 2px masih menempel tepi
+  layar). Padding card dan panel transaksi juga 3px, dan jarak antara kolom
+  katalog dengan kolom transaksi 3px. Dua container utama layar kasir
+  dibelah dua tanpa garis: katalog di kiri, transaksi di kanan, supaya konten
+  tidak pernah menabrak katalog saat layar digeser ke kanan.
+- Jarak antar card produk di katalog mengikuti spacing asal (grid renggang),
+  bukan ikut dirapatkan. Yang dirapatkan hanya jarak internal antar elemen
+  di dalam satu card.
+- Pada lebar layar xl, halaman kasir dikunci setinggi layar: kolom katalog
+  (kiri) dan kolom transaksi (kanan) masing-masing punya scrollbar sendiri.
+  Menggulir transaksi tidak boleh menyeret menu ikut bergeser. Di bawah xl
+  layout turun jadi satu kolom dan halaman digulir seperti biasa. Tiap kolom
+  dijorok 10px ke arah tengah dari tepi luar (menu +10px ke kanan, transaksi
+  +10px ke kiri) supaya tidak ada yang terpotong tepi layar.
+- Kolom transaksi memakai mode `fill` (tanpa `sticky` dan tanpa scroller
+  sendiri) karena tinggi dan scroll-nya sudah diurus kolom induknya. Halaman
+  detail pesanan yang satu kolom tetap memakai mode `sticky` bawaan.
+- Tombol Clear dan Batal di panel transaksi tanpa garis bawah. Tombol "Lepas"
+  pada field Pelanggan dihapus (pilih ulang dari dropdown untuk mengganti).
+- Jarak 1px antara blok Rincian Pesanan dan form Catatan supaya tidak
+  terlihat menyatu.
+- Detail produk tidak menampilkan petunjuk "Tekan Enter untuk masukkan
+  keranjang"; tombol silang diletakkan di pojok kanan atas gambar.
+- Pengatur jumlah (- qty +) di baris pesanan memakai ukuran compact agar tidak
+  memakan ruang di panel transaksi.
+- Kolom transaksi: Meja dan Pelanggan memakai baris label-kiri/input-kanan.
+- Kode barang (SKU) tampil di menu produk kasir: di bawah nama pada kartu grid,
+  di bawah nama pada baris tabel, dan di pojok kanan atas gambar pada
+  tampilan hero (tombol "+" digeser ke bawah kode barang agar tidak menutupi).
+  Admin mengatur lewat toggle "Kode Barang" di pengaturan kasir
+  (`pos.cashier_show_sku`, default tampil). Produk tanpa SKU tidak menampilkan
+  baris kosong. Kolom `products.sku` sudah ada dan form produk admin sudah
+  mengisinya.
+- Form pembayaran yang muncul setelah menekan Bayar tidak memakai border,
+  garis, maupun latar; pemisahnya hanya jarak.
+- Metode pembayaran: tanpa label "Metode", tanpa icon, dan tanpa border. Semua
+  metode tetap bisa dipilih; yang tidak aktif hanya teks redup, yang aktif
+  menyala.
+- Pintasan keyboard: di field diskon Enter menutup editor (Escape membatalkan
+  isian). Di field Pelanggan, ArrowDown/ArrowUp memindah sorotan pada dropdown,
+  Enter memilih opsi yang disorot, dan Enter saat mengetik nama yang belum ada
+  langsung membuka form pendaftaran.
+- Tombol: Bayar | Draft | Simpan, dengan teks "Status : ..." di bawahnya.
+  Bayar membuka form pembayaran (nominal default = total tagihan, metode
+  pembayaran, kembalian) dan menggantikan ketiga tombol itu dengan
+  Simpan | Cetak Nota. "Cetak Nota" menyimpan pembayaran lalu langsung mencetak
+  struk. Ada tombol X untuk menutup form tanpa menyimpan.
+- Diskon persen ditulis "Diskon 5%" seperti PPN 11%, nominal rupiah tetap
+  ditulis di sebelah kanan, dan warnanya hitam (bukan merah).
+- Input nominal diskon di dalam form tidak memakai awalan "Rp" (barisnya sudah
+  berada di sebelah label Diskon) dan angkanya rata kanan. Nama menu pada
+  rincian pesanan dibungkus, tidak dipotong satu baris.
+- Pelanggan baru didaftarkan lewat form lengkap (tipe perorangan/perusahaan,
+  nama, telepon, email, alamat, dan data badan usaha bila perusahaan). Yang
+  WAJIB hanya nama; seluruh field lain opsional dan hanya dikirim kalau diisi,
+  sehingga bisa dilengkapi belakangan dari menu admin. Aturan yang sama berlaku
+  di endpoint kasir dan endpoint admin. Tidak ada teks keterangan di bawah judul
+  form maupun di bawah field Pelanggan.
+- Ikon Cek Pesanan di panel transaksi sekaligus menjadi tombol buka dan
+  tombol tutup: saat tampilan penuh keranjang terbuka, ikon yang sama
+  mengembalikan kasir ke katalog.
+- Halaman Cek Pesanan tidak menampilkan paragraf penjelasan. Judul, jumlah item,
+  dan tombol silang satu baris; silang langsung di sebelah jumlah item.
+
 KOLOM AKSI TABEL PESANAN:
+- Tabel Transaksi: kolom "Pesanan" diganti "Nama Pelanggan" (menampilkan
+  "Pelanggan Umum" bila kosong, daftar menu, dan total). Nomor order dan
+  nomor faktur disatukan jadi satu nomor saja per pesanan: nomor faktur bila
+  sudah ada, jika belum (draft) memakai nomor pesanan. Kolom dirapatkan
+  (padding `px-1.5`), teks sel membungkus bukan dipotong satu baris, dan
+  garis hanya antar baris (horizontal) tanpa garis vertikal antar kolom.
 - Lihat detail: selalu ada untuk pesanan yang terlihat di tabel.
 - Cetak struk: selalu ada, kecuali draft (draft belum punya faktur).
 - Lanjutkan draft / Koreksi isi: transaction.update (draft) atau
@@ -88,3 +161,10 @@ Catatan (User):
 - Seeder bersifat idempotent (updateOrCreate berdasarkan email).
 - Role disinkronkan via syncRoles berdasarkan slug role.
 - Jalankan: php artisan db:seed --class=UserSeeder
+
+
+
+
+1. Tombol clear dan batal tidak perlu garis pada transaksi
+2. hapus tombol lepas pada pelanggan
+3. berikan tanda silang untuk menutuup cek pesanan tepat disebelah total item count 1 baris dengan judul Cek Pesanan. Hapus paragraf penjelsan nya Keranjang aktif, belum disimpan sebagai pesanan.

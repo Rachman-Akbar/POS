@@ -17,6 +17,7 @@ class Setting extends Model
     private const CASHIER_FLAGS = [
         'cashier_show_favorites' => true,
         'cashier_show_stock' => true,
+        'cashier_show_sku' => true,
         'cashier_enable_table' => true,
         'cashier_enable_customer' => true,
         'cashier_enable_ppn' => true,

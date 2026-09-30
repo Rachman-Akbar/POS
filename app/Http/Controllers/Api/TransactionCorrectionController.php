@@ -55,7 +55,7 @@ class TransactionCorrectionController extends Controller
                 'integer',
                 Rule::exists('customers', 'id')->where('is_active', true),
             ],
-            'notes' => ['required', 'string', 'min:5', 'max:1000'],
+            'notes' => ['nullable', 'string', 'max:1000'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'tax_rate' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
@@ -64,8 +64,6 @@ class TransactionCorrectionController extends Controller
             'items.*.notes' => ['nullable', 'string', 'max:500'],
         ], [
             'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
-            'notes.required' => 'Catatan koreksi wajib diisi.',
-            'notes.min' => 'Catatan koreksi minimal 5 karakter.',
         ]);
 
         $this->authorizeDiscount($request, (float) ($data['discount'] ?? 0));
@@ -80,7 +78,7 @@ class TransactionCorrectionController extends Controller
                 [
                     'discount' => (float) ($data['discount'] ?? 0),
                     'tax_rate' => isset($data['tax_rate']) ? (float) $data['tax_rate'] : null,
-                    'notes' => $data['notes'],
+                    'notes' => $data['notes'] ?? null,
                     'customer_id' => $data['customer_id'] ?? null,
                 ],
             );
@@ -94,12 +92,12 @@ class TransactionCorrectionController extends Controller
             'transaction',
             $corrected,
             sprintf(
-                'Memperbaiki isi transaksi %s menjadi %d item. Total %s → %s. Alasan: %s',
+                'Memperbaiki isi transaksi %s menjadi %d item. Total %s → %s.%s',
                 $corrected->order_number,
                 count($data['items']),
                 $this->rupiah($before['total']),
                 $this->rupiah((float) $corrected->total_amount),
-                $data['notes'],
+                $this->noteForAudit($data['notes'] ?? null),
             ),
             $before,
             $this->snapshot($corrected),
@@ -274,5 +272,16 @@ class TransactionCorrectionController extends Controller
     private function rupiah(float $value): string
     {
         return 'Rp. '.number_format($value, 0, ',', '.');
+    }
+
+    /**
+     * Catatan koreksi bersifat opsional, jadi kalimat audit log harus tetap
+     * enak dibaca baik ketika ada catatannya maupun ketika dikosongkan.
+     */
+    private function noteForAudit(?string $notes): string
+    {
+        $notes = trim((string) $notes);
+
+        return $notes === '' ? '' : ' Alasan: '.$notes;
     }
 }

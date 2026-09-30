@@ -23,16 +23,26 @@ import { ItemStatusBadge } from '../badges';
  * @property {string} [status] Status item, hanya untuk `readOnly`.
  */
 
+/**
+ * Pengatur jumlah di baris pesanan.
+ *
+ * `btn-icon` sendiri 40px, terlalu besar untuk dipakai di dalam daftar ringkas
+ * panel transaksi. Ukuran compact dipaksa dengan `!` karena `btn-icon` berasal
+ * dari lapis komponen, yang urutannya berada sebelum utilitas.
+ */
 export function QtyStepper({ qty, onChange, size = 'sm' }) {
-    const box = size === 'sm' ? 'w-7 h-7' : 'w-9 h-9';
+    const compact = size === 'sm';
+    const box = compact ? '!w-6 !h-6 !rounded-md' : '!w-9 !h-9';
+    const icon = compact ? 12 : 14;
+
     return (
-        <div className="inline-flex items-center gap-1">
+        <div className="inline-flex items-center gap-0.5">
             <button onClick={() => onChange(-1)} className={`btn-icon ${box} bg-surface-2`} title="Kurangi">
-                <Minus size={14} />
+                <Minus size={icon} />
             </button>
-            <span className={`${size === 'sm' ? 'w-6 text-sm' : 'w-10 text-lg'} text-center font-bold`}>{qty}</span>
+            <span className={`${compact ? 'w-4 text-xs' : 'w-8 text-base'} text-center font-bold tabular-nums`}>{qty}</span>
             <button onClick={() => onChange(1)} className={`btn-icon ${box} bg-accent-soft text-accent-ink hover:bg-accent hover:text-on-accent`} title="Tambah">
-                <Plus size={14} />
+                <Plus size={icon} />
             </button>
         </div>
     );

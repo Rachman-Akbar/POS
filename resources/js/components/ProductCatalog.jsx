@@ -38,7 +38,7 @@ function ProductImage({ product, className = '' }) {
     return <img src={product.image} alt={product.name} loading="lazy" onError={() => setErr(true)} className={className} />;
 }
 
-export const CardItem = ({ product, onOpen, onAdd, onSelect, showStock, compact = false, active = false }) => {
+export const CardItem = ({ product, onOpen, onAdd, onSelect, showStock, showSku = true, compact = false, active = false }) => {
     const out = product.stock <= 0;
     const open = () => (onSelect ? onSelect(product) : !out && onOpen(product));
 
@@ -58,6 +58,17 @@ export const CardItem = ({ product, onOpen, onAdd, onSelect, showStock, compact 
 
             <div className={`flex-1 flex flex-col gap-2 ${compact ? 'p-2' : 'p-3'}`}>
                 <div className={`font-semibold leading-snug line-clamp-2 ${compact ? 'text-[11px]' : 'text-sm'}`}>{product.name}</div>
+
+                {/* Kode barang hanya ditampilkan kalau produk punya SKU dan
+                    admin menyalakan flag-nya di panel pengaturan. */}
+                {showSku && product.sku && (
+                    <div
+                        className={`font-mono text-faint truncate -mt-1 ${compact ? 'text-[9px]' : 'text-[10px]'}`}
+                        title={`Kode barang: ${product.sku}`}
+                    >
+                        {product.sku}
+                    </div>
+                )}
 
                 <div className="mt-auto flex items-end justify-between gap-2">
                     <button
@@ -98,7 +109,7 @@ const fitText = (text = '') => {
     return 'text-sm leading-snug';
 };
 
-const TableView = ({ items, title, open, onToggle, onOpen, onAdd, showStock }) => (
+const TableView = ({ items, title, open, onToggle, onOpen, onAdd, showStock, showSku = true }) => (
     <div className="rounded-xl overflow-hidden bg-surface">
         <table className="w-full table-fixed">
             <thead>
@@ -153,6 +164,11 @@ const TableView = ({ items, title, open, onToggle, onOpen, onAdd, showStock }) =
                                         </div>
                                         <div className="flex-1 min-w-0 self-center px-4 py-2">
                                             <span className={`block break-words font-semibold ${fitText(product.name)}`}>{product.name}</span>
+                                            {showSku && product.sku && (
+                                                <span className="block font-mono text-[10px] text-faint truncate">
+                                                    {product.sku}
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 </td>
@@ -193,7 +209,7 @@ const TableView = ({ items, title, open, onToggle, onOpen, onAdd, showStock }) =
 
 const STRIP_PAGE = 6;
 
-const HeroView = ({ items, onOpen, onAdd, showStock, height = 'calc(100dvh - 9.5rem)' }) => {
+const HeroView = ({ items, onOpen, onAdd, showStock, showSku = true, height = 'calc(100dvh - 9.5rem)' }) => {
     const [active, setActive] = useState(0);
     const [page, setPage] = useState(0);
 
@@ -239,6 +255,17 @@ const HeroView = ({ items, onOpen, onAdd, showStock, height = 'calc(100dvh - 9.5
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
                     <span className="absolute top-4 left-4 badge bg-white/90 text-gray-700">{product.category ?? 'Lainnya'} {product.is_favorite ? '· Favorit' : ''}</span>
+                    {/* Kode barang di pojok kanan atas gambar. Tombol "+"
+                        digeser ke bawahnya supaya tidak saling menutupi. */}
+                    {showSku && product.sku && (
+                        <span
+                            className="absolute top-4 right-4 max-w-[60%] truncate rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white backdrop-blur-sm"
+                            title={`Kode barang: ${product.sku}`}
+                        >
+                            {product.sku}
+                        </span>
+                    )}
+
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -246,7 +273,9 @@ const HeroView = ({ items, onOpen, onAdd, showStock, height = 'calc(100dvh - 9.5
                         }}
                         disabled={out}
                         title={out ? 'Stok habis' : 'Tambah ke transaksi'}
-                        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white text-accent hover:bg-accent hover:text-on-accent flex items-center justify-center transition-colors disabled:opacity-50"
+                        className={`absolute right-4 w-10 h-10 rounded-full bg-white text-accent hover:bg-accent hover:text-on-accent flex items-center justify-center transition-colors disabled:opacity-50 ${
+                            showSku && product.sku ? 'top-[3.25rem]' : 'top-4'
+                        }`}
                     >
                         <Plus size={20} />
                     </button>
@@ -296,6 +325,7 @@ const HeroView = ({ items, onOpen, onAdd, showStock, height = 'calc(100dvh - 9.5
                                 onAdd={onAdd}
                                 onSelect={(selected) => setActive(items.findIndex((p) => p.id === selected.id))}
                                 showStock={showStock}
+                                showSku={showSku}
                                 compact
                                 active={page * STRIP_PAGE + index === active}
                             />
@@ -333,6 +363,7 @@ export default function ProductCatalog({
     category = ALL_CATEGORIES,
     onCategoryChange,
     showStock = true,
+    showSku = true,
     showFavorites = true,
     hideToolbar = false,
     collapsed: collapsedProp,
@@ -406,7 +437,7 @@ export default function ProductCatalog({
      */
     const renderList = (items, section = {}) => {
         if (view === 'hero') {
-            return <HeroView items={items} onOpen={setDetail} onAdd={onAdd} showStock={showStock} height={section.heroHeight} />;
+            return <HeroView items={items} onOpen={setDetail} onAdd={onAdd} showStock={showStock} showSku={showSku} height={section.heroHeight} />;
         }
         if (view === 'table') {
             return (
@@ -418,13 +449,14 @@ export default function ProductCatalog({
                     onOpen={setDetail}
                     onAdd={onAdd}
                     showStock={showStock}
+                    showSku={showSku}
                 />
             );
         }
         return (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                 {items.map((product) => (
-                    <CardItem key={product.id} product={product} onOpen={setDetail} onAdd={onAdd} showStock={showStock} />
+                    <CardItem key={product.id} product={product} onOpen={setDetail} onAdd={onAdd} showStock={showStock} showSku={showSku} />
                 ))}
             </div>
         );
@@ -486,7 +518,7 @@ export default function ProductCatalog({
         const heroHeight = hideToolbar ? 'calc(100dvh - 6.5rem)' : 'calc(100dvh - 9.5rem)';
 
         return (
-            <div>
+            <div className="space-y-0.5">
                 {toolbar}
                 {filteredCount === 0 ? emptyState : renderList(filtered, { heroHeight })}
                 {detail && <ProductDetailModal product={detail} onClose={() => setDetail(null)} onAdd={onAdd} />}
@@ -495,7 +527,7 @@ export default function ProductCatalog({
     }
 
     return (
-        <div>
+        <div className="space-y-0.5">
             {toolbar}
             {favoritesSection}
 
