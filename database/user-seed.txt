@@ -1,0 +1,90 @@
+ISI SEED USER (database/seeders/UserSeeder.php)
+================================================
+
+Semua akun memiliki password: password (dapat ditimpa melalui env POS_DEV_PASSWORD).
+Login menerima nama pengguna (username) maupun email.
+
+Nama             | Username      | Email                                | Hak Akses (role)
+-----------------|---------------|--------------------------------------|------------------
+Ahmad Fauzi      | ahmad         | ahmad.fauzi@warungnusantara.id       | super-admin
+Dewi Anggraini   | dewi.admin    | dewi.anggraini@warungnusantara.id    | admin
+Bagus Prasetyo   | bagus         | bagus.prasetyo@warungnusantara.id    | supervisor
+Maya Lestari     | maya          | maya.lestari@warungnusantara.id      | manager
+Siti Rahayu      | siti          | siti.rahayu@warungnusantara.id       | kasir
+Budi Santoso     | budi          | budi.santoso@warungnusantara.id      | kasir
+Rina Wulandari   | rina          | rina.wulandari@warungnusantara.id    | pelayan
+Agus Prasetyo    | agus          | agus.prasetyo@warungnusantara.id     | dapur
+Dewi Lestari     | dewi.dapur    | dewi.lestari@warungnusantara.id      | dapur
+
+RINGKASAN HAK AKSES DEFAULT (database/seeders/RoleSeeder.php)
+============================================================================
+
+Role            | Cakupan                                                        | Jml perm
+----------------|----------------------------------------------------------------|----------
+Super Admin     | Semua modul penuh (bypass lewat role, bukan tabel permission)   | 44/44
+Admin           | Semua permission kecuali role.delete                             | 44
+Supervisor      | Semua akses kecuali 7 permission *.delete                        | 38
+Manager         | Read-only seluruh modul (view + accounting, settings)            | 11
+Kasir           | Jual + bayar + diskon + kelola pelanggan                         | 15
+Pelayan         | Catat & selesaikan pesanan dine-in tanpa pembayaran              | 8
+Dapur           | Lihat antrean + ubah status produksi                             | 4
+
+Supervisor (38): 
+- Tidak memiliki: product.delete, category.delete, customer.delete, cash.delete,
+  payment_method.delete, user.delete, role.delete.
+
+KOREKSI TRANSAKSI (transaction.correct):
+- Pemegang bawaan: Admin dan Supervisor (Super Admin otomatis lewat bypass).
+- Tidak dimiliki: Kasir, Pelayan, Dapur, Manager.
+- Fungsi: memperbaiki isi transaksi yang salah input (menu, jumlah, meja,
+  diskon, PPN) lewat ikon koreksi pada kolom Aksi di tabel Pesanan, lalu
+  disimpan ke endpoint PUT /api/orders/{order}/corrections.
+- Catatan koreksi WAJIB diisi (minimal 5 karakter), disimpan di catatan
+  transaksi dan tercatat di audit log. Pembayaran, stok, dan jurnal tidak
+  diubah — koreksi uang tetap lewat void/refund.
+- Diskon pada koreksi tetap butuh permission pos.discount.
+
+KOLOM AKSI TABEL PESANAN:
+- Lihat detail: selalu ada untuk pesanan yang terlihat di tabel.
+- Cetak struk: selalu ada, kecuali draft (draft belum punya faktur).
+- Lanjutkan draft / Koreksi isi: transaction.update (draft) atau
+  transaction.correct (transaksi sudah diproses).
+- Hapus draft / Batalkan: transaction.update (draft, dihapus permanen) atau
+  transaction.void (transaksi jadi, dibatalkan penuh: uang dikembalikan, stok
+  dikembalikan, tercatat di audit log, dan pesanan ditutup).
+- Transaksi yang sudah dibatalkan tidak menampilkan aksi ubah/hapus.
+- Refur/void dari daftar tetap butuh alasan, sama seperti dari detail pesanan.
+- Super Admin melihat semua ikon karena seluruh permission diikutinya.
+
+Manager (11):
+- product.view, category.view, customer.view, cash.view, payment_method.view,
+  user.view, accounting.view, settings.view, transaction.view,
+  transaction.view.all, pos.view, kitchen.view.
+
+Kasir (15):
+- settings.view, product.view, product.favorite, category.view, customer.view,
+  customer.create, cash.view, payment_method.view, transaction.view,
+  transaction.create, transaction.update, pos.view, pos.sell, pos.discount,
+  kitchen.view.
+
+Pelayan (8):
+- settings.view, product.view, product.favorite, customer.view,
+  transaction.view, transaction.create, transaction.update, kitchen.view.
+
+Dapur (4):
+- settings.view, product.view, kitchen.view, kitchen.update.
+
+Catatan:
+- Role Super Admin / Admin / Supervisor memakai pola all_except: permission
+  baru di katalog otomatis mereka miliki saat db:seed dijalankan ulang.
+- Role only (Manager / Kasir / Pelayan / Dapur) tidak: aksesnya tetap sesuai
+  daftar di atas, kustomisasi admin tidak diganggu.
+- Daftar role hanya titik awal; admin bebas menambah/mengubah/menghapus role
+  bawaan. Hanya Super Admin yang terkunci (akar seluruh hak akses).
+
+============================================================================
+
+Catatan (User):
+- Seeder bersifat idempotent (updateOrCreate berdasarkan email).
+- Role disinkronkan via syncRoles berdasarkan slug role.
+- Jalankan: php artisan db:seed --class=UserSeeder

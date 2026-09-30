@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Events\OrderStatusUpdated;
+use App\Http\Controllers\Api\Concerns\AuthorizesDiscount;
 use App\Http\Controllers\Api\Concerns\SafeBroadcasts;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
@@ -13,17 +14,20 @@ use App\Services\TransactionScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
 /**
  * Koreksi transaksi oleh admin.
  *
  * Kasir salah input tidak boleh dihapus diam-diam, jadi setiap koreksi di sini
  * wajib menyebut alasan dan langsung tercatat di audit log. Permission-nya
- * terpisah: `transaction.void` untuk pembatalan total, `transaction.refund`
- * untuk pengembalian uang. Role kasir tidak diberi keduanya.
+ * terpisah: `transaction.correct` untuk memperbaiki isi pesanan,
+ * `transaction.void` untuk pembatalan total, `transaction.refund` untuk
+ * pengembalian uang. Role kasir tidak diberi ketiganya.
  */
 class TransactionCorrectionController extends Controller
 {
+    use AuthorizesDiscount;
     use SafeBroadcasts;
 
     public function __construct(
@@ -31,6 +35,85 @@ class TransactionCorrectionController extends Controller
         private readonly TransactionScope $scope,
         private readonly AuditLogger $audit,
     ) {}
+
+    /**
+     * Koreksi isi transaksi yang salah input: menu, jumlah, meja, diskon, PPN.
+     *
+     * Ini bukan pembatalan dan bukan pengembalian uang — pesanan tetap jalan,
+     * stok dan pembayaran yang sudah tercatat tidak disentuh, hanya isinya
+     * yang diperbaiki. Karena itu koreksi selalu menuntut catatan yang
+     * menjelaskan apa yang salah dan disimpan pada transaksinya sendiri.
+     */
+    public function correct(Request $request, Order $order): JsonResponse
+    {
+        $this->guardScope($request, $order);
+
+        $data = $request->validate([
+            'table_number' => ['nullable', 'string', 'max:50'],
+            'customer_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('customers', 'id')->where('is_active', true),
+            ],
+            'notes' => ['required', 'string', 'min:5', 'max:1000'],
+            'discount' => ['nullable', 'numeric', 'min:0'],
+            'tax_rate' => ['nullable', 'numeric', 'min:0'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'exists:products,id'],
+            'items.*.qty' => ['required', 'integer', 'min:1'],
+            'items.*.notes' => ['nullable', 'string', 'max:500'],
+        ], [
+            'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
+            'notes.required' => 'Catatan koreksi wajib diisi.',
+            'notes.min' => 'Catatan koreksi minimal 5 karakter.',
+        ]);
+
+        $this->authorizeDiscount($request, (float) ($data['discount'] ?? 0));
+
+        $before = $this->snapshot($order);
+
+        try {
+            $corrected = $this->salesService->correctOrder(
+                $order,
+                $data['table_number'] ?? '',
+                $data['items'],
+                [
+                    'discount' => (float) ($data['discount'] ?? 0),
+                    'tax_rate' => isset($data['tax_rate']) ? (float) $data['tax_rate'] : null,
+                    'notes' => $data['notes'],
+                    'customer_id' => $data['customer_id'] ?? null,
+                ],
+            );
+        } catch (\DomainException $e) {
+            return $this->rejected($e->getMessage());
+        }
+
+        $this->audit->log(
+            $request,
+            'correct',
+            'transaction',
+            $corrected,
+            sprintf(
+                'Memperbaiki isi transaksi %s menjadi %d item. Total %s → %s. Alasan: %s',
+                $corrected->order_number,
+                count($data['items']),
+                $this->rupiah($before['total']),
+                $this->rupiah((float) $corrected->total_amount),
+                $data['notes'],
+            ),
+            $before,
+            $this->snapshot($corrected),
+        );
+
+        // Item bisa saja bertambah atau berkurang, jadi papan dapur dan antrean
+        // pelayan harus ikut berubah di monitor lain tanpa perlu refresh.
+        $this->safeBroadcast(new OrderStatusUpdated($corrected, $before['status']));
+
+        return response()->json([
+            'message' => 'Transaksi diperbaiki.',
+            'data' => ['order' => $corrected],
+        ]);
+    }
 
     /**
      * Pembatalan total: kembalikan stok, batalkan faktur, kembalikan seluruh

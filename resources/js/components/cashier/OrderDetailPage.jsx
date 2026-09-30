@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, ChevronLeft, Printer, ReceiptText, ShoppingCart, Trash2, User, UtensilsCrossed } from 'lucide-react';
+import { Building2, ChevronLeft, Pencil, Printer, ReceiptText, ShoppingCart, Trash2, User, UtensilsCrossed } from 'lucide-react';
 import { formatIDR } from '../../api/client';
 import { isDraftOrder, isUnpaidOrder, receivedOf, remainingOf } from '../../utils/order';
 import Price, { PriceRow } from '../Price';
@@ -12,19 +12,15 @@ import ViewModeSwitch from '../ViewModeSwitch';
  * Halaman detail satu order dari tab Pesanan.
  *
  * Tampilannya penuh seperti tab "Cek Pesanan": daftar produk di kiri dan panel
- * "Transaksi" di kanan dengan cangkang,Meja, Pelanggan, Rincian Pesanan, total,
- * metode, rekening, QRIS, dan Nominal yang sama persis. Bedanya hanya pada
- * sifat datanya:
+ * "Transaksi" di kanan. Produk selalu readOnly di sini — mengedit draft
+ * dilakukan lewat tombol "Lanjutkan Draft" yang membuka draft di halaman utama
+ * kasir, tempat menu bisa ditambah, diubah, lalu disimpan atau dikirim ke dapur.
  *
- * - Cek Pesanan    -> keranjang aktif, bisa diubah dan dibayar di tempat.
- * - Detail Pesanan -> order tersimpan, produk readOnly dan pembayaran hanya
- *   menampilkan riwayat, bukan menerima input baru.
- *
- * Tombol cetak struk tidak ada di panel, melainkan di header paling kanan.
- *
- * Aksi mengikuti status order. Draft bisa dilanjutkan menjadi faktur dan
- * dikirim ke dapur tanpa pembayaran; order yang belum lunas hanya menerima
- * pelunasan. Order non-draft tidak pernah menampilkan tombol simpan atau draft.
+ * Aksi mengikuti status order. Draft bisa dilanjutkan ke editor kasir atau
+ * dihapus; order yang belum lunas hanya menerima pembayaran sisa tagihan.
+ * Order non-draft tidak pernah menampilkan tombol simpan atau draft, tapi
+ * pemegang `transaction.correct` (Admin/Supervisor) mendapat tombol "Koreksi
+ * Transaksi" untuk memperbaiki isi pesanan yang salah input.
  */
 export default function OrderDetailPage({
     order,
@@ -35,16 +31,16 @@ export default function OrderDetailPage({
     onMethodChange,
     qrisId = null,
     onSettle,
-    onFinalize,
+    onContinueDraft,
     onDelete = null,
+    canEdit = false,
+    onEdit = null,
     onPrint,
     onClose,
     busy = false,
     correction = null,
 }) {
     // Form pembayaran tertutup sejak awal supaya panel Transaksi tetap ringkas.
-    // Kasir membukanya lewat tombol "Bayar" dan menutupnya dengan tombol yang
-    // sama, jadi tidak ada kontrol kedua yang harus dicari.
     const [payOpen, setPayOpen] = useState(false);
     // Nominal pelunasan yang diinput kasir. Kosong berarti pakai sisa tagihan.
     const [settleRaw, setSettleRaw] = useState('');
@@ -129,6 +125,15 @@ export default function OrderDetailPage({
                 </div>
 
                 <div className="ml-auto flex items-center gap-2">
+                    {!draft && canEdit && !voided && (
+                        <button
+                            onClick={onEdit}
+                            className="btn btn-secondary"
+                            title="Perbaiki isi transaksi yang salah input (menu, jumlah, meja, diskon). Pembayaran dan stok tidak berubah."
+                        >
+                            <Pencil size={15} /> Koreksi Transaksi
+                        </button>
+                    )}
                     {!draft && (
                         <button
                             onClick={onPrint}
@@ -180,6 +185,15 @@ export default function OrderDetailPage({
                             </div>
                         </div>
 
+                        {order.notes && (
+                            <div>
+                                <span className="label">Catatan</span>
+                                <div className="input !py-2 text-sm whitespace-pre-wrap">
+                                    {order.notes}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex items-center justify-between gap-2">
                             <span className="label !mb-0">Rincian Pesanan</span>
                             <span className="badge badge-pending">{items.length} item</span>
@@ -227,41 +241,12 @@ export default function OrderDetailPage({
                             />
                         </div>
 
-                        <PaymentButton
-                            open={payOpen}
-                            onToggle={() => setPayOpen((open) => !open)}
-                            methods={draft ? [] : payMethods}
-                            method={method}
-                            onMethodChange={onMethodChange}
-                            qrisId={!draft && method === 'qris' ? qrisId : null}
-                            note={
-                                draft ? (
-                                    <p className="text-[11px] text-muted">Belum ada metode pembayaran.</p>
-                                ) : unpaid ? (
-                                    <p className="text-[11px] text-muted">
-                                        Sisa tagihan{' '}
-                                        <span className="font-semibold text-content tabular-nums">{formatIDR(remaining)}</span>
-                                    </p>
-                                ) : null
-                            }
-                            amount={
-                                draft
-                                    ? null
-                                    : unpaid
-                                      ? { raw: settleRaw, onChange: setSettleRaw, placeholder: String(remaining) }
-                                      : { raw: String(received), onChange: () => {}, disabled: true }
-                            }
-                            status={status}
-                            change={settleChange}
-                            summary={<Price value={received} className="text-sm shrink-0" amountClassName="font-semibold" />}
-                        />
-
                         {draft ? (
-                            <div className="flex items-center gap-2 mt-3">
+                            <div className="mt-3 flex items-center gap-2">
                                 <button
-                                    onClick={onFinalize}
+                                    onClick={onContinueDraft}
                                     disabled={busy}
-                                    title="Terbitkan faktur dan kirim ke dapur tanpa pembayaran — pelunasan dilakukan belakangan (pay-later)"
+                                    title="Buka draft di halaman kasir untuk menambah atau mengubah menu, lalu simpan atau lanjutkan ke dapur"
                                     className="btn btn-primary flex-1 justify-center"
                                 >
                                     {busy ? 'Memproses...' : <><ShoppingCart size={15} /> Lanjutkan Draft</>}
@@ -277,25 +262,56 @@ export default function OrderDetailPage({
                                     </button>
                                 )}
                             </div>
-                        ) : unpaid ? (
-                            <button
-                                onClick={() => onSettle(settleAmount)}
-                                disabled={busy || settleAmount <= 0}
-                                title="Terima pembayaran sebesar nominal di atas"
-                                className="btn btn-success w-full justify-center mt-3"
-                            >
-                                {busy ? 'Memproses...' : 'Terima Pelunasan'}
-                            </button>
-                        ) : null}
+                        ) : (
+                            <>
+                                <PaymentButton
+                                    open={payOpen}
+                                    onToggle={() => setPayOpen((open) => !open)}
+                                    methods={payMethods}
+                                    method={method}
+                                    onMethodChange={onMethodChange}
+                                    qrisId={method === 'qris' ? qrisId : null}
+                                    note={
+                                        unpaid ? (
+                                            <p className="text-[11px] text-muted">
+                                                Sisa tagihan{' '}
+                                                <span className="font-semibold text-content tabular-nums">{formatIDR(remaining)}</span>
+                                            </p>
+                                        ) : null
+                                    }
+                                    amount={
+                                        unpaid
+                                            ? { raw: settleRaw, onChange: setSettleRaw, placeholder: String(remaining) }
+                                            : { raw: String(received), onChange: () => {}, disabled: true }
+                                    }
+                                    status={status}
+                                    change={settleChange}
+                                    summary={<Price value={received} className="text-sm shrink-0" amountClassName="font-semibold" />}
+                                />
 
-                        <TransactionCorrection
-                            order={order}
-                            canVoid={correction?.canVoid ?? false}
-                            canRefund={correction?.canRefund ?? false}
-                            onVoid={correction?.onVoid}
-                            onRefund={correction?.onRefund}
-                            busy={busy}
-                        />
+                                {unpaid && (
+                                    <button
+                                        onClick={() => onSettle(settleAmount)}
+                                        disabled={busy || settleAmount <= 0}
+                                        title="Terima pembayaran sebesar nominal di atas"
+                                        className="btn btn-success w-full justify-center mt-3"
+                                    >
+                                        {busy ? 'Memproses...' : 'Terima Pelunasan'}
+                                    </button>
+                                )}
+                            </>
+                        )}
+
+                        {!draft && (
+                            <TransactionCorrection
+                                order={order}
+                                canVoid={correction?.canVoid ?? false}
+                                canRefund={correction?.canRefund ?? false}
+                                onVoid={correction?.onVoid}
+                                onRefund={correction?.onRefund}
+                                busy={busy}
+                            />
+                        )}
                     </div>
                 </TransactionCard>
             </div>

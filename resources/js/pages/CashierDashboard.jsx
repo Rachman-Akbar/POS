@@ -4,6 +4,7 @@ import {
     Printer, ReceiptText, Check,
     Minus, Plus, ShoppingCart, UtensilsCrossed, AlertCircle,
     Save, ChevronRight, ImageOff, ClipboardList, ChefHat, Trash2,
+    Ban, Eye, Pencil,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ProductCatalog, { ALL_CATEGORIES, catalogSectionKeys } from '../components/ProductCatalog';
@@ -18,10 +19,10 @@ import { ItemStatusBadge } from '../components/badges';
 import { useAuth } from '../auth/AuthContext';
 import { api, errorMessage, formatIDR, parseNumber } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
-import { notifySuccess, notifyError, Swal, confirmAction } from '../utils/alerts';
+import { notifySuccess, notifyError, Swal, askCorrectionReason, confirmAction } from '../utils/alerts';
 import {
     DRAFT_FILTER, isDraftOrder, isUnpaidOrder, isVoidedOrder, orderProcessStatus,
-    receivedOf, remainingOf, VOID_FILTER,
+    receivedOf, refundableOf, remainingOf, VOID_FILTER,
     PAYMENT_FILTER, paymentFilterOf, matchesPaymentFilter,
 } from '../utils/order';
 
@@ -75,7 +76,21 @@ export default function CashierDashboard() {
     const canVoid = can('transaction.void');
     const canRefund = can('transaction.refund');
 
-    const [tab, setTab] = useState('kasir');
+    // Koreksi isi transaksi yang salah input. Role bawaan yang memegangnya
+    // adalah Admin dan Supervisor, jadi kasir tidak pernah melihat tombol ini
+    // walaupun ia tahu endpoint-nya.
+    const canCorrect = can('transaction.correct');
+
+    // Mengubah dan menghapus draft (isi pesanan sebelum diproses). Kasir sudah
+    // memegangnya karena draft memang dibuatnya.
+    const canUpdate = can('transaction.update');
+
+    const [tab, setTab] = useState(() => {
+        // Jangan memaksa kasir kembali ke halaman utama saat halaman di-refresh:
+        // tab aktif terakhir dipulihkan supaya kerja tidak mulai dari nol.
+        const saved = localStorage.getItem('cashboard.tab');
+        return saved === 'kasir' || saved === 'pesanan' || saved === 'dapur' ? saved : 'kasir';
+    });
     const [mode, setMode] = useState('grid');
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState(ALL_CATEGORIES);
@@ -83,10 +98,10 @@ export default function CashierDashboard() {
     const [table, setTable] = useState('');
     const [discountType, setDiscountType] = useState('percent');
     const [discountRaw, setDiscountRaw] = useState('');
+    const [notes, setNotes] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [payOpen, setPayOpen] = useState(false);
     const [paidRaw, setPaidRaw] = useState('');
-    const [paidTouched, setPaidTouched] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [selected, setSelected] = useState({});
     const [collapsed, setCollapsed] = useState({});
@@ -95,6 +110,11 @@ export default function CashierDashboard() {
     const [orderStage, setOrderStage] = useState(ALL_CATEGORIES);
     const [paymentFilter, setPaymentFilter] = useState(PAYMENT_FILTER.All);
     const [detailOrderId, setDetailOrderId] = useState(null);
+    // Order yang sedang diedit dari halaman kasir: draft (Lanjutkan Draft) maupun
+    // transaksi final yang dikoreksi super admin. Ketika terisi, tab Kasir
+    // bekerja sebagai editor — total dan aksinya dipakai untuk memperbarui
+    // order ini, bukan membuat order baru.
+    const [editingOrder, setEditingOrder] = useState(null);
     const [settling, setSettling] = useState(false);
 
     const { data: products = [] } = useQuery({
@@ -136,11 +156,6 @@ export default function CashierDashboard() {
         [orders, detailOrderId],
     );
 
-    const kitchenTotal = KITCHEN_COLUMNS.reduce(
-        (sum, column) => sum + (kitchen[column.key]?.length ?? 0),
-        0,
-    );
-
     /**
      * Order yang cocok dengan pencarian header, sebelum filter tahap
      * diterapkan. Dipisah karena jumlah per tahap di dropdown filter dihitung
@@ -169,6 +184,28 @@ export default function CashierDashboard() {
             return haystack.includes(needle);
         });
     }, [orders, orderQuery]);
+
+    /**
+     * Dapur di tab kasir memakai kolom pesanan yang sama dengan halaman Dapur.
+     * Pencariannya mengikuti kata kunci `orderQuery` (meja, faktur, pelanggan,
+     * dan isi menu) lewat id order yang cocok, supaya mengetik di kolom Dapur
+     * benar-benar menyaring isi papan, bukan cuma placeholder yang tidak
+     * bereaksi.
+     */
+    const kitchenVisible = useMemo(() => {
+        if (orderQuery.trim() === '') return kitchen;
+        const matched = new Set(searchMatchedOrders.map((order) => order.id));
+        const visible = {};
+        Object.entries(kitchen).forEach(([key, list]) => {
+            visible[key] = list.filter((item) => matched.has(item.order?.id));
+        });
+        return visible;
+    }, [kitchen, searchMatchedOrders, orderQuery]);
+
+    const kitchenVisibleTotal = useMemo(
+        () => Object.values(kitchenVisible).reduce((total, list) => total + list.length, 0),
+        [kitchenVisible],
+    );
 
     /** Order setelah pencarian header, filter tahap proses, dan filter lunas. */
     const stageMatchedOrders = useMemo(
@@ -265,14 +302,25 @@ export default function CashierDashboard() {
     const isLunas = paid >= total && total > 0;
     const canDraft = cart.length > 0 && !submitting;
     const canSubmit = canDraft && (!enableTable || table !== '') && (enablePrepay ? paid > 0 : isLunas);
-
-    useEffect(() => {
-        if (!paidTouched && total > 0) {
-            setPaidRaw(String(Math.round(total)));
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [total, paidTouched, cart.length]);
-
+    // Order yang sedang diedit. Hanya draft yang bisa "dilanjutkan" (finalisasi
+    // kirim ke dapur); koreksi transaksi yang sudah diproses cukup disimpan.
+    const editingIsDraft = Boolean(editingOrder) && isDraftOrder(editingOrder);
+    // Koreksi isi transaksi wajib menyertakan catatan: tanpa catatan, tidak ada
+    // yang bisa menelusuri apa yang sebenarnya salah saat selisih ditanya.
+    const correctionNoteReady = notes.trim().length >= 5;
+    // Menyimpan editor: draft bebas tanpa catatan, koreksi tidak.
+    const canSaveEdit =
+        Boolean(editingOrder) &&
+        canDraft &&
+        (!enableTable || table !== '') &&
+        (editingIsDraft || correctionNoteReady);
+    // Editor boleh dilanjutkan tanpa pembayaran (paid = 0 berarti pay-later) atau
+    // dengan pembayaran penuh/sebagian sesuai aturan prepay.
+    const canContinueDraft =
+        editingIsDraft &&
+        canDraft &&
+        (!enableTable || table !== '') &&
+        (paid === 0 || (enablePrepay ? paid > 0 : paid >= total));
 
     const addToCart = (product, qty = 1) => {
         setCart((prev) => {
@@ -312,7 +360,7 @@ export default function CashierDashboard() {
         setDiscountRaw('');
         setDiscountType('percent');
         setPaidRaw('');
-        setPaidTouched(false);
+        setNotes('');
         setPayOpen(false);
         setCustomer(null);
     };
@@ -329,6 +377,7 @@ export default function CashierDashboard() {
                 payment_method: paymentMethod,
                 paid_amount: paid,
                 customer_id: customer?.id,
+                notes: notes.trim() || undefined,
                 items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
             });
             resetCheckout();
@@ -357,6 +406,7 @@ export default function CashierDashboard() {
                 discount: totals.discount,
                 tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
                 customer_id: customer?.id,
+                notes: notes.trim() || undefined,
                 items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
             });
             resetCheckout();
@@ -406,21 +456,118 @@ export default function CashierDashboard() {
     };
 
     /**
-     * Lanjutkan draft: menerbitkan invoice dan menarik stok, lalu pesanan masuk
-     * dapur. Tidak ada pembayaran di sini — pelunasan dilakukan belakangan,
-     * setelah pelanggan selesai dan datang ke kasir (pay-later). Halaman detail
-     * otomatis berganti ke alur "Terima Pelunasan" begitu order terrefetch.
+     * Buka order di halaman utama kasir ("Lanjutkan Draft" untuk draft, "Edit
+     * Transaksi" untuk koreksi super admin): isi keranjang, meja, pelanggan,
+     * dan diskon order disalin ke state kasir, lalu tab Kasir dikunci ke mode
+     * editor untuk order tersebut. Kasir bisa menambah menu dari katalog,
+     * mengubah jumlah, lalu Simpan/Simpan Draft untuk memperbarui, atau
+     * Lanjutkan (khusus draft) untuk mengirim ke dapur.
      */
-    const finalizeDraft = async (order) => {
+    const openEditor = (order) => {
+        setCart(
+            (order.items ?? []).map((item) => {
+                const product = products.find((p) => p.id === item.product_id);
+                return {
+                    product_id: item.product_id,
+                    name: product?.name ?? item.product?.name ?? '-',
+                    price: Number(product?.price ?? item.price ?? 0),
+                    qty: Number(item.qty),
+                };
+            }),
+        );
+        setTable(order.table_number ?? '');
+        setCustomer(order.customer ?? null);
+        setDiscountType('amount');
+        setDiscountRaw(String(Number(order.discount) > 0 ? order.discount : ''));
+        setNotes(order.notes ?? '');
+        setPaidRaw('');
+        setPayOpen(false);
+        setEditingOrder(order);
+        setDetailOrderId(null);
+        setTab('kasir');
+    };
+
+    /** Batal mengedit order dari tab Kasir: kembali bersih tanpa mengubah apapun. */
+    const cancelEdit = () => {
+        setEditingOrder(null);
+        resetCheckout();
+    };
+
+    /**
+     * Simpan keranjang editor ke order yang sedang dibuka.
+     *
+     * Draft dikirim ke endpoint draft biasa: nilainya tetap draft, tidak
+     * difinalisasi dan tidak masuk dapur. Transaksi yang sudah diproses dikirim
+     * ke endpoint koreksi, yang mewajibkan catatan, tidak menyentuh stok,
+     * jurnal, maupun pembayaran, dan tercatat di audit log. Setelah tersimpan
+     * editor ditutup dan kembali ke halaman menu utama (kasir) dengan keranjang
+     * kosong, siap untuk transaksi berikutnya.
+     */
+    const saveOrderChanges = async () => {
+        if (!editingOrder || !canSaveEdit) return;
         setSettling(true);
         try {
-            await api.post(`/orders/${order.id}/finalize`);
-            notifySuccess(`Draft ${order.order_number} dilanjutkan dan dikirim ke dapur.`);
+            const payload = {
+                table_number: enableTable ? table : undefined,
+                discount: totals.discount,
+                tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
+                customer_id: customer?.id ?? editingOrder.customer_id ?? undefined,
+                notes: notes.trim() || undefined,
+                items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
+            };
+
+            if (editingIsDraft) {
+                await api.put(`/orders/${editingOrder.id}`, payload);
+                notifySuccess(`Draft ${editingOrder.order_number} diperbarui.`);
+            } else {
+                await api.put(`/orders/${editingOrder.id}/corrections`, payload);
+                notifySuccess(
+                    `Transaksi ${editingOrder.order_number} diperbaiki. Pembayaran dan stok tidak berubah.`,
+                );
+            }
+
+            resetCheckout();
+            setEditingOrder(null);
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
+        } catch (err) {
+            notifyError('Perubahan gagal disimpan', errorMessage(err, 'Gagal menyimpan perubahan.'));
+        } finally {
+            setSettling(false);
+        }
+    };
+
+    /**
+     * Lanjutkan draft dari editor kasir: simpan perubahan dulu (menu, meja,
+     * diskon), lalu finalisasi. Bila nominal pembayaran terisi, dicatat
+     * sebagai pembayaran; kosong berarti pay-later. Setelah berhasil editor
+     * ditutup dan keranjang dikosongkan.
+     */
+    const submitDraft = async () => {
+        if (!editingOrder || !canContinueDraft) return;
+        setSettling(true);
+        try {
+            const payload = {
+                table_number: enableTable ? table : undefined,
+                discount: totals.discount,
+                tax_rate: enablePpn ? Number(taxRate) || 0 : 0,
+                customer_id: customer?.id ?? editingOrder.customer_id ?? undefined,
+                notes: notes.trim() || undefined,
+                items: cart.map(({ product_id, qty }) => ({ product_id, qty })),
+            };
+            await api.put(`/orders/${editingOrder.id}`, payload);
+            await api.post(
+                `/orders/${editingOrder.id}/finalize`,
+                paid > 0 ? { payment_method: paymentMethod, paid_amount: paid } : {},
+            );
+            notifySuccess(`Draft ${editingOrder.order_number} dilanjutkan dan dikirim ke dapur.`);
+            resetCheckout();
+            setEditingOrder(null);
             queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
             queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
             queryClient.invalidateQueries({ queryKey: ['products'] });
         } catch (err) {
-            notifyError('Draft gagal diproses', err.response?.data?.message ?? 'Gagal melanjutkan draft.');
+            notifyError('Draft gagal dilanjutkan', errorMessage(err, 'Gagal melanjutkan draft.'));
         } finally {
             setSettling(false);
         }
@@ -434,7 +581,6 @@ export default function CashierDashboard() {
             'Ya, hapus',
         );
         if (!confirmed) return;
-
         setSettling(true);
         try {
             await api.delete(`/orders/${order.id}`);
@@ -448,11 +594,9 @@ export default function CashierDashboard() {
         }
     };
 
-    /**
-     * Pembatalan penuh: uang yang sudah masuk dikembalikan, stok dikembalikan,
-     * dan pesanan ditutup. Dipisah dari `settle`/`finalizeDraft` karena efeknya
-     * menyentuh tiga modul sekaligus (pesanan, faktur, dan dapur).
-     */
+    /** Pembatalan penuh: uang yang sudah masuk dikembalikan, stok dikembalikan,
+     * dan pesanan ditutup. Efeknya menyentuh tiga modul sekaligus (pesanan,
+     * faktur, dan dapur). */
     const voidOrder = async (order, reason) => {
         setSettling(true);
         try {
@@ -474,6 +618,53 @@ export default function CashierDashboard() {
         } finally {
             setSettling(false);
         }
+    };
+
+    /**
+     * Pembatalan yang dipicu dari kolom aksi daftar pesanan.
+     *
+     * Alasannya ditanyakan di sini, bukan di panel koreksi detail, supaya
+     * pembatalan bisa dilakukan tanpa membuka detail lebih dulu. Bentuk
+     * pertanyaannya tetap sama karena keduanya memakai helper yang sama.
+     */
+    const askAndVoidOrder = async (order) => {
+        const refundable = refundableOf(order);
+        const reference = order.invoice?.invoice_number ?? order.order_number;
+
+        const reason = await askCorrectionReason(
+            'Pembatalan transaksi?',
+            refundable > 0
+                ? `Seluruh uang yang sudah masuk pada <b>${reference}</b> sebesar <b>${formatIDR(refundable)}</b> akan dikembalikan ke pelanggan, stok dikembalikan, dan pesanan ditutup sebagai <b>Dibatalkan</b>. Tindakan ini tercatat di audit log.`
+                : `<b>${reference}</b> akan ditandai <b>Dibatalkan</b>, stok dikembalikan, dan pesanan ditutup. Belum ada uang masuk sehingga tidak ada pengembalian. Tindakan ini tercatat di audit log.`,
+            'Ya, batalkan',
+        );
+
+        if (!reason) return;
+
+        const confirmed = await confirmAction(
+            'Yakin membatalkan transaksi ini?',
+            'Pembatalan tidak bisa dibatalkan dan transaksi tidak bisa dibayar lagi.',
+            'Ya, batalkan',
+        );
+
+        if (!confirmed) return;
+
+        await voidOrder(order, reason);
+    };
+
+    /**
+     * Aksi "hapus" pada kolom aksi: draft benar-benar dihapus karena belum
+     * pernah diproses, sedangkan transaksi yang sudah jadi dibatalkan supaya
+     * uang, stok, dan jejaknya tetap bisa ditelusuri.
+     */
+    const removeOrder = async (order) => {
+        if (isDraftOrder(order)) {
+            await deleteDraft(order);
+
+            return;
+        }
+
+        await askAndVoidOrder(order);
     };
 
     /** Retur sebagian: mengembalikan uang pada satu penerimaan pembayaran. */
@@ -549,6 +740,11 @@ export default function CashierDashboard() {
         }
     }, [tab, visibleTab]);
 
+    // Simpan tab aktif agar bisa dipulihkan saat halaman di-refresh.
+    useEffect(() => {
+        localStorage.setItem('cashboard.tab', tab);
+    }, [tab]);
+
     const onOrderList = visibleTab === 'pesanan' && !onOrderDetail;
     // Papan Dapur tidak punya katalog: pencarian produk dan filter kategori
     // tidak ada gunanya di sana, begitu juga pengalih tampilan dan buka semua.
@@ -574,19 +770,21 @@ export default function CashierDashboard() {
 
     const header = {
         navLabel: onOrderDetail ? 'Detail Pesanan' : 'Pesanan',
-        showCatalog: !onKitchenBoard && !onOrderDetail,
+        showCatalog: !onOrderDetail,
         mode: onCatalog ? mode : undefined,
         onModeChange: onCatalog ? setMode : undefined,
         allOpen: onCatalog ? allSectionsOpen : undefined,
         onToggleAll: onCatalog ? toggleAllSections : undefined,
-        query: onOrderList ? orderQuery : query,
-        onQueryChange: onOrderList ? setOrderQuery : onCatalog ? setQuery : undefined,
+        query: onOrderList || onKitchenBoard ? orderQuery : query,
+        onQueryChange: onCatalog ? setQuery : setOrderQuery,
         searchPlaceholder: onOrderList
             ? 'Cari no pesanan, faktur, meja, atau pelanggan...'
-            : 'Cari produk...',
+            : onCatalog
+                ? 'Cari produk...'
+                : 'Cari no pesanan atau menu...',
         categories: onOrderList ? stageCategories : categories,
         category: onOrderList ? orderStage : category,
-        onCategoryChange: onOrderList ? setOrderStage : setCategory,
+        onCategoryChange: onOrderList ? setOrderStage : onCatalog ? setCategory : undefined,
         filterAllLabel: onOrderList ? 'Semua Tahap' : 'Semua Kategori',
         filterPlaceholder: onOrderList ? 'Cari tahap proses...' : 'Cari kategori...',
         filterEmptyLabel: onOrderList ? 'Tahap tidak ditemukan.' : 'Kategori tidak ditemukan.',
@@ -601,6 +799,11 @@ export default function CashierDashboard() {
         activeNav: onOrderDetail ? 'pesanan' : visibleTab,
         onNavChange: (next) => {
             setDetailOrderId(null);
+            // Pencarian produk dan pencarian pesanan berbagi satu kotak di
+            // header; kosongkan yang tidak relevan saat pindah tab supaya tidak
+            // ada kata kunci sisa yang diam-diam menyaring halaman lain.
+            if (next !== 'kasir' && next !== 'cart') setQuery('');
+            if ((next === 'kasir') || (next === 'cart')) setOrderQuery('');
             setTab(next);
         },
     };
@@ -631,21 +834,28 @@ export default function CashierDashboard() {
             qrisId={settings?.qris_id}
             totals={totals}
             paidRaw={paidRaw}
-            onPaidChange={(digits) => {
-                setPaidTouched(true);
-                setPaidRaw(digits);
-            }}
+            onPaidChange={setPaidRaw}
             paid={paid}
             change={change}
             payOpen={payOpen}
             onPayToggle={() => setPayOpen((v) => !v)}
             canSubmit={canSubmit}
             canDraft={canDraft}
-            submitting={submitting}
+            submitting={submitting || settling}
             onClear={resetCheckout}
             onSubmit={submitOrder}
             onSaveDraft={saveDraft}
             onViewChange={setTab}
+            editingOrder={editingOrder}
+            editingIsDraft={editingIsDraft}
+            canContinueDraft={canContinueDraft}
+            canSaveEdit={canSaveEdit}
+            correctionNoteReady={correctionNoteReady}
+            notes={notes}
+            onNotesChange={setNotes}
+            onCancelEdit={cancelEdit}
+            onSaveOrderChanges={saveOrderChanges}
+            onSubmitDraft={submitDraft}
         />
     );
 
@@ -668,7 +878,9 @@ export default function CashierDashboard() {
             }
             qrisId={settings?.qris_id ?? null}
             onSettle={(amount) => detailOrder && settle(detailOrder, amount)}
-            onFinalize={() => detailOrder && finalizeDraft(detailOrder)}
+            onContinueDraft={() => detailOrder && openEditor(detailOrder)}
+            canEdit={canCorrect}
+            onEdit={() => detailOrder && openEditor(detailOrder)}
             onDelete={() => detailOrder && deleteDraft(detailOrder)}
             onPrint={() => detailOrder && printReceipt(detailOrder)}
             onClose={() => setDetailOrderId(null)}
@@ -814,10 +1026,23 @@ export default function CashierDashboard() {
                                 <tbody className="divide-y divide-line">
                                     {visibleOrders.map((order) => {
                                         const draft = isDraftOrder(order);
+                                        const voided = isVoidedOrder(order);
                                         const received = receivedOf(order);
                                         const remaining = remainingOf(order);
                                         const unpaid = isUnpaidOrder(order);
                                         const customer = order.customer?.company_name || order.customer?.name;
+
+                                        // Aksi kolom mengikuti hak akses, bukan
+                                        // peran: draft boleh diubah/dihapus siapa
+                                        // pun yang bisa mengolah pesanan
+                                        // (transaction.update), sedangkan
+                                        // transaksi yang sudah diproses hanya
+                                        // boleh dikoreksi (transaction.correct)
+                                        // atau dibatalkan (transaction.void).
+                                        // Super Admin melewati semua permission
+                                        // sehingga selalu melihat semuanya.
+                                        const canEditRow = draft ? canUpdate : canCorrect;
+                                        const canRemoveRow = draft ? canUpdate : canVoid;
 
                                         return (
                                             <tr
@@ -881,18 +1106,61 @@ export default function CashierDashboard() {
                                                     )}
                                                 </td>
                                                 <td className="table-cell text-right">
-                                                    {!draft && (
+                                                    <div className="flex items-center justify-end gap-1">
                                                         <button
                                                             className="btn btn-ghost !px-2 !py-1.5"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
-                                                                printReceipt(order);
+                                                                setDetailOrderId(order.id);
                                                             }}
-                                                            title="Cetak Struk"
+                                                            title="Lihat detail pesanan"
                                                         >
-                                                            <Printer size={14} />
+                                                            <Eye size={14} />
                                                         </button>
-                                                    )}
+
+                                                        {!draft && (
+                                                            <button
+                                                                className="btn btn-ghost !px-2 !py-1.5"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    printReceipt(order);
+                                                                }}
+                                                                title="Cetak Struk"
+                                                            >
+                                                                <Printer size={14} />
+                                                            </button>
+                                                        )}
+
+                                                        {!voided && canEditRow && (
+                                                            <button
+                                                                className="btn btn-ghost !px-2 !py-1.5"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    openEditor(order);
+                                                                }}
+                                                                title={
+                                                                    draft
+                                                                        ? 'Lanjutkan draft: ubah isi pesanan di halaman kasir'
+                                                                        : 'Koreksi isi transaksi yang salah input'
+                                                                }
+                                                            >
+                                                                {draft ? <ClipboardList size={14} /> : <Pencil size={14} />}
+                                                            </button>
+                                                        )}
+
+                                                        {!voided && canRemoveRow && (
+                                                            <button
+                                                                className="btn btn-ghost !px-2 !py-1.5 !text-negative"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    removeOrder(order);
+                                                                }}
+                                                                title={draft ? 'Hapus draft' : 'Batalkan transaksi (void)'}
+                                                            >
+                                                                {draft ? <Trash2 size={14} /> : <Ban size={14} />}
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );
@@ -913,12 +1181,16 @@ export default function CashierDashboard() {
                         <span className="text-xs text-muted">Diubah oleh koki di halaman Dapur</span>
                     </div>
 
-                    {kitchenTotal === 0 ? (
-                        <div className="text-muted text-center py-10">Tidak ada pesanan menunggu dapur.</div>
+                    {kitchenVisibleTotal === 0 ? (
+                        <div className="text-muted text-center py-10">
+                            {orderQuery.trim()
+                                ? 'Tidak ada pesanan yang cocok dengan pencarian.'
+                                : 'Tidak ada pesanan menunggu dapur.'}
+                        </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-5 gap-3">
                             {KITCHEN_COLUMNS.map((column) => {
-                                const list = kitchen[column.key] ?? [];
+                                const list = kitchenVisible[column.key] ?? [];
 
                                 return (
                                     <div key={column.key} className="rounded-xl border border-line bg-surface-2 p-2">
@@ -1081,7 +1353,9 @@ function CheckoutPanel({
     paymentMethod, onPaymentMethodChange, payMethods, qrisId,
     totals, paidRaw, onPaidChange, paid, change,
     payOpen, onPayToggle, canSubmit, canDraft, submitting, onSubmit, onSaveDraft, onClear,
-    onViewChange,
+    onViewChange, notes = '', onNotesChange,
+    editingOrder = null, editingIsDraft = false, canContinueDraft = false, canSaveEdit = false,
+    correctionNoteReady = false, onCancelEdit, onSaveOrderChanges, onSubmitDraft,
 }) {
     const totalAmount = totals.total;
     const empty = cart.length === 0;
@@ -1101,17 +1375,50 @@ function CheckoutPanel({
 
     return (
         <TransactionCard title="Transaksi" icon={ShoppingCart} actions={
-            <button
-                onClick={onClear}
-                disabled={empty}
-                className="text-xs font-bold text-negative underline underline-offset-2 decoration-2 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:no-underline disabled:text-muted disabled:cursor-not-allowed"
-                title="Kosongkan transaksi"
-            >
-                Clear
-            </button>
+            editingOrder ? (
+                <button
+                    onClick={onCancelEdit}
+                    className="text-xs font-bold text-negative underline underline-offset-2 decoration-2 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer"
+                    title="Batalkan edit dan kosongkan keranjang"
+                >
+                    Batal
+                </button>
+            ) : (
+                <button
+                    onClick={onClear}
+                    disabled={empty}
+                    className="text-xs font-bold text-negative underline underline-offset-2 decoration-2 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:no-underline disabled:text-muted disabled:cursor-not-allowed"
+                    title="Kosongkan transaksi"
+                >
+                    Clear
+                </button>
+            )
         }>
-            {empty ? null : (
+            {empty ? (
+                editingOrder ? (
+                    <p className="text-sm text-muted text-center py-6">
+                        Order kosong — tambahkan menu dari katalog di samping.
+                    </p>
+                ) : null
+            ) : (
                 <>
+                    {editingOrder && (
+                        <div className="flex items-center gap-2 rounded-xl bg-accent-soft text-accent-ink px-3 py-2 mb-3">
+                            <ReceiptText size={15} className="shrink-0" />
+                            <div className="min-w-0">
+                                <div className="text-xs font-bold truncate">
+                                    {editingIsDraft
+                                        ? `Lanjutkan Draft ${editingOrder.order_number}`
+                                        : `Koreksi Transaksi ${editingOrder.order_number}`}
+                                </div>
+                                <div className="text-[11px] opacity-80">
+                                    {editingIsDraft
+                                        ? 'Tambah/ubah menu dari katalog di samping.'
+                                        : 'Isi pesanan diperbaiki, pembayaran & stok tetap. Isi catatan wajib.'}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     <div className="mt-3 space-y-3 pr-0.5">
                         {enableTable && (
                             <div>
@@ -1162,10 +1469,35 @@ function CheckoutPanel({
                         </div>
                     </div>
 
-                    <div className="mt-4 pt-3">
-                        <div className="space-y-1.5">
-                            <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm text-muted">Subtotal</span>
+                        <div>
+                            <span className="label">
+                                Catatan
+                                {editingOrder && !editingIsDraft && (
+                                    <span className="text-negative"> *</span>
+                                )}
+                            </span>
+                            <textarea
+                                className="input min-h-[60px] resize-y"
+                                value={notes}
+                                onChange={(event) => onNotesChange(event.target.value)}
+                                maxLength={1000}
+                                placeholder={
+                                    editingOrder && !editingIsDraft
+                                        ? 'Wajib diisi: apa yang salah input, mis. "Menu ketukik dua kali".'
+                                        : 'Catatan untuk pesanan ini (opsional)...'
+                                }
+                            />
+                            {editingOrder && !editingIsDraft && !correctionNoteReady && (
+                                <p className="text-[11px] text-negative mt-1 flex items-center gap-1">
+                                    <AlertCircle size={11} /> Catatan koreksi wajib diisi minimal 5 karakter.
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="mt-4 pt-3">
+                            <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-sm text-muted">Subtotal</span>
                                 <PriceRow
                                     value={totals.subtotal}
                                     className={TOTAL_VALUE}
@@ -1233,24 +1565,53 @@ function CheckoutPanel({
                             }
                         />
 
-                        <div className="flex items-center gap-2 mt-3">
-                            <button
-                                type="button"
-                                className="btn btn-secondary flex-1 justify-center"
-                                disabled={!canDraft || submitting}
-                                onClick={onSaveDraft}
-                                title="Simpan sementara tanpa diproses — lanjutkan dari tab Pesanan"
-                            >
-                                {submitting ? 'Memproses...' : <><ReceiptText size={16} /> Draft</>}
-                            </button>
-                            <button
-                                className="btn btn-primary flex-1 justify-center"
-                                disabled={!canSubmit || submitting}
-                                onClick={onSubmit}
-                            >
-                                {submitting ? 'Memproses...' : <><Save size={16} /> Simpan</>}
-                            </button>
-                        </div>
+                        {editingOrder ? (
+                            <div className="flex items-center gap-2 mt-3">
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary flex-1 justify-center"
+                                    disabled={!canSaveEdit || submitting}
+                                    onClick={onSaveOrderChanges}
+                                    title={
+                                        editingIsDraft
+                                            ? 'Simpan perubahan, draft tetap draft — belum diproses'
+                                            : 'Simpan koreksi isi transaksi (stok dan pembayaran tidak berubah)'
+                                    }
+                                >
+                                    {submitting ? 'Memproses...' : <><ReceiptText size={16} /> {editingIsDraft ? 'Simpan Draft' : 'Simpan Koreksi'}</>}
+                                </button>
+                                {editingIsDraft && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary flex-1 justify-center"
+                                        disabled={!canContinueDraft || submitting}
+                                        onClick={onSubmitDraft}
+                                        title="Simpan lalu kirim draft ke dapur"
+                                    >
+                                        {submitting ? 'Memproses...' : <><Save size={16} /> Lanjutkan</>}
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 mt-3">
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary flex-1 justify-center"
+                                    disabled={!canDraft || submitting}
+                                    onClick={onSaveDraft}
+                                    title="Simpan sementara tanpa diproses — lanjutkan dari tab Pesanan"
+                                >
+                                    {submitting ? 'Memproses...' : <><ReceiptText size={16} /> Simpan Draft</>}
+                                </button>
+                                <button
+                                    className="btn btn-primary flex-1 justify-center"
+                                    disabled={!canSubmit || submitting}
+                                    onClick={onSubmit}
+                                >
+                                    {submitting ? 'Memproses...' : <><Save size={16} /> Simpan</>}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

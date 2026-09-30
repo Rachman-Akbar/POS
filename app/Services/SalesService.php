@@ -179,6 +179,132 @@ class SalesService
     }
 
     /**
+     * Edit isi sebuah draft sebelum diproses.
+     *
+     * Kasir dibolehkan mengubah isi draft: menambah atau menghapus menu,
+     * mengubah jumlah, mengganti meja, sampai menyesuaikan diskon dan PPN.
+     * Karena draft belum menyentuh invoice, stok, dan jurnal, item lama cukup
+     * dihapus lalu dibuat ulang sesuai isi terbaru tanpa efek berantai.
+     *
+     * Order yang sudah diproses ditolak di sini. Koreksi salah input pada
+     * transaksi yang sudah jadi memakai `correctOrder()`, yang permission-nya
+     * terpisah (`transaction.correct`) dan selalu tercatat di audit log.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @param  array{discount?: float, tax_rate?: float|null, notes?: string|null, customer_id?: int|null}  $options
+     */
+    public function updateDraft(Order $order, string $tableNumber, array $items, array $options = []): Order
+    {
+        return DB::transaction(function () use ($order, $tableNumber, $items, $options) {
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== OrderStatus::Draft->value) {
+                throw new \DomainException('Pesanan ini bukan draft.');
+            }
+
+            if (empty($items)) {
+                throw new \DomainException('Draft tidak memiliki item.');
+            }
+
+            $this->rewriteContents($locked, $tableNumber, $items, $options);
+
+            return $locked->fresh(['items.product', 'invoice', 'customer']);
+        });
+    }
+
+    /**
+     * Koreksi isi transaksi yang sudah diproses.
+     *
+     * Salah input di kasir tidak selalu berarti transaksi harus dibatalkan:
+     * menu ketukik dua kali, jumlah terbalik, atau meja salah hanya perlu isi
+     * pesanan yang diperbaiki. Karena itu koreksi di sini mengubah menu,
+     * jumlah, meja, diskon, dan PPN tanpa menyentuh apa pun yang sudah
+     * tercatat: stok tidak ditarik ulang, jurnal tetap, dan pembayaran yang
+     * sudah diterima tidak berubah.
+     *
+     * Catatan koreksi ditambahkan ke catatan transaksi, bukan menggantikannya,
+     * supaya alasan dari setiap perbaikan tetap terbaca pada pesanannya.
+     * Koreksi terhadap transaksi yang sudah dibatalkan ditolak: pembatalan
+     * sudah membalik seluruhnya, jadi isinya tidak boleh diubah lagi.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @param  array{discount?: float, tax_rate?: float|null, notes?: string|null, customer_id?: int|null}  $options
+     */
+    public function correctOrder(Order $order, string $tableNumber, array $items, array $options = []): Order
+    {
+        return DB::transaction(function () use ($order, $tableNumber, $items, $options) {
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->isVoided()) {
+                throw new \DomainException('Transaksi ini sudah dibatalkan.');
+            }
+
+            if (empty($items)) {
+                throw new \DomainException('Pesanan tidak memiliki item.');
+            }
+
+            // Catatan koreksi menyusul catatan yang sudah ada, bukan
+            // menggantikannya, supaya alasan koreksi lama tidak hilang.
+            if (isset($options['notes'])) {
+                $options['notes'] = $this->appendNote($locked->notes, (string) $options['notes']);
+            }
+
+            $this->rewriteContents($locked, $tableNumber, $items, $options);
+
+            return $locked->fresh(['items.product', 'invoice', 'invoice.receipts', 'customer']);
+        });
+    }
+
+    /**
+     * Tulis ulang isi order: item lama dihapus, lalu item baru dibuat dari
+     * daftar terbaru dan subtotal, diskon, PPN, serta total dihitung ulang.
+     *
+     * Dipakai editor draft maupun koreksi admin. Keduanya sama-sama tidak
+     * menyentuh stok: draft memang belum menarik stok, sedangkan koreksi
+     * hanya memperbaiki isi tanpa memakai atau mengembalikan stok yang sudah
+     * tercatat.
+     *
+     * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
+     * @param  array{discount?: float, tax_rate?: float|null, notes?: string|null, customer_id?: int|null}  $options
+     */
+    private function rewriteContents(Order $order, string $tableNumber, array $items, array $options): void
+    {
+        $order->items()->delete();
+
+        [$subtotal] = $this->attachItems($order, $items, reserveStock: false);
+
+        $order->update([
+            'table_number' => $tableNumber ?: null,
+            'customer_id' => $options['customer_id'] ?? $order->customer_id,
+            'notes' => $options['notes'] ?? $order->notes,
+        ]);
+
+        $this->applyTotals($order, $subtotal, $options);
+
+        // Total invoice ikut diselaraskan supaya struk tidak mencetak angka yang
+        // berbeda dengan pesanan.
+        if ($order->invoice instanceof SalesInvoice) {
+            $order->invoice->update(['total_amount' => $order->total_amount]);
+        }
+    }
+
+    /**
+     * Gabungkan catatan baru ke catatan lama, dipotong ke panjang kolom.
+     */
+    private function appendNote(?string $existing, string $note): ?string
+    {
+        $note = trim($note);
+
+        if ($note === '') {
+            return $existing;
+        }
+
+        $combined = trim(($existing ?? '')."\n".$note);
+
+        return substr($combined, 0, 1000);
+    }
+
+    /**
      * Hapus draft sepenuhnya.
      *
      * Draft tidak membentuk invoice, tidak mempunyai jurnal, dan tidak menarik

@@ -4,6 +4,7 @@ import {
     ChevronLeft, ChevronRight, Package, Pencil, Plus, Search, Star, Trash2,
 } from 'lucide-react';
 import { api, formatIDR } from '../../api/client';
+import { useAuth } from '../../auth/AuthContext';
 import { confirmAction, notifyError, notifySuccess } from '../../utils/alerts';
 import FormModal, { Field, FieldRow } from './FormModal';
 
@@ -39,11 +40,15 @@ const toForm = (product) =>
 
 export default function ProductManager() {
     const queryClient = useQueryClient();
+    const { can } = useAuth();
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('');
     const [page, setPage] = useState(1);
     const [form, setForm] = useState(null);
     const [errors, setErrors] = useState({});
+    // Kolom Favorit hanya berguna bila user bisa menandai: tanpa permission ini
+    // tombol tetap tampil tapi dikunci, dan backend juga menolak PATCH-nya.
+    const canFavorite = can('product.favorite');
 
     const { data: categories = [] } = useQuery({
         queryKey: ['master-categories'],
@@ -65,6 +70,28 @@ export default function ProductManager() {
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
         queryClient.invalidateQueries({ queryKey: ['settings'] });
     };
+
+    const toggleFavorite = useMutation({
+        mutationFn: (product) => api.patch(`/products/${product.id}/favorite`),
+        onMutate: (product) => {
+            // Optimis: semua halaman master-products (hasil pencarian/filter apa
+            // pun) dibalik status favoritnya, kemudian disinkronkan saat settle.
+            queryClient.setQueriesData({ queryKey: ['master-products'] }, (old) => {
+                if (!old) return old;
+                return {
+                    ...old,
+                    data: (old.data ?? []).map((p) =>
+                        p.id === product.id ? { ...p, is_favorite: !p.is_favorite } : p,
+                    ),
+                };
+            });
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: ['master-products'] });
+            queryClient.invalidateQueries({ queryKey: ['admin-products'] });
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
+        },
+    });
 
     const saveProduct = useMutation({
         mutationFn: (payload) =>
@@ -174,6 +201,7 @@ export default function ProductManager() {
                                     <th className="table-head text-right">Harga</th>
                                     <th className="table-head text-right">Stok</th>
                                     <th className="table-head text-center">Status</th>
+                                    <th className="table-head text-center">Favorit</th>
                                     <th className="table-head text-right">Aksi</th>
                                 </tr>
                             </thead>
@@ -190,9 +218,8 @@ export default function ProductManager() {
                                                     )}
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="font-semibold text-sm truncate flex items-center gap-1.5">
+                                                    <div className="font-semibold text-sm truncate">
                                                         {product.name}
-                                                        {product.is_favorite && <Star size={12} className="text-accent shrink-0" fill="currentColor" />}
                                                     </div>
                                                     <div className="text-[11px] text-muted truncate">{product.sku || 'Tanpa SKU'}</div>
                                                 </div>
@@ -207,6 +234,21 @@ export default function ProductManager() {
                                             ) : (
                                                 <span className="badge badge-pending">Nonaktif</span>
                                             )}
+                                        </td>
+                                        <td className="table-cell text-center">
+                                            <button
+                                                onClick={() => toggleFavorite.mutate(product)}
+                                                disabled={!canFavorite || toggleFavorite.isPending}
+                                                title={product.is_favorite ? 'Hapus dari Favorit' : 'Tandai sebagai Favorit'}
+                                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                                                    product.is_favorite
+                                                        ? 'bg-accent text-on-accent'
+                                                        : 'bg-surface-3 text-muted hover:bg-surface-3/70'
+                                                } ${!canFavorite ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                            >
+                                                <Star size={12} fill={product.is_favorite ? 'currentColor' : 'none'} />
+                                                Favorit
+                                            </button>
                                         </td>
                                         <td className="table-cell">
                                             <div className="flex justify-end gap-1">

@@ -349,4 +349,124 @@ class DraftFlowTest extends TestCase
 
         $this->assertDatabaseHas('orders', ['id' => $draft->id]);
     }
+
+    public function test_a_draft_can_have_its_menu_edited_before_finalizing(): void
+    {
+        $draft = $this->saveDraft(2);
+        $other = Product::where('id', '!=', $this->product->id)->where('is_active', true)->firstOrFail();
+
+        $this->actingAs($this->cashier)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '9',
+                'items' => [
+                    ['product_id' => $this->product->id, 'qty' => 1],
+                    ['product_id' => $other->id, 'qty' => 3],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', OrderStatus::Draft->value)
+            ->assertJsonPath('data.table_number', '9')
+            ->assertJsonCount(2, 'data.items');
+
+        $draft->refresh();
+
+        $this->assertSame('9', $draft->table_number);
+        $this->assertCount(2, $draft->items);
+        $this->assertSame(1, $draft->items()->where('product_id', $this->product->id)->firstOrFail()->qty);
+        $this->assertSame(3, $draft->items()->where('product_id', $other->id)->firstOrFail()->qty);
+        $this->assertSame(
+            (float) $draft->items->sum(fn ($item) => $item->price * $item->qty),
+            (float) $draft->subtotal,
+        );
+        // Editan draft tetap tidak menyentuh stok, invoice, dan jurnal.
+        $this->assertDatabaseCount('sales_invoices', 0);
+        $this->assertDatabaseCount('journal_entries', 0);
+    }
+
+    public function test_editing_a_draft_recomputes_discount_and_tax(): void
+    {
+        $draft = $this->saveDraft(2);
+        $subtotal = (float) $draft->subtotal;
+        // Diskon dikirim sebagai nominal rupiah, sama seperti create/storeDraft.
+        $discount = round($subtotal * 0.25, 2);
+        $tax = round(($subtotal - $discount) * 0.11, 2);
+
+        $this->actingAs($this->cashier)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '5',
+                'discount' => $discount,
+                'tax_rate' => 11,
+                'items' => $draft->items->map(fn ($item) => ['product_id' => $item->product_id, 'qty' => $item->qty])->all(),
+            ])
+            ->assertOk();
+
+        $draft->refresh();
+
+        $this->assertSame($discount, (float) $draft->discount);
+        $this->assertSame($tax, (float) $draft->tax_amount);
+        $this->assertSame(round($subtotal - $discount + $tax, 2), (float) $draft->total_amount);
+    }
+
+    public function test_an_empty_draft_cannot_be_saved(): void
+    {
+        $draft = $this->saveDraft();
+
+        $this->actingAs($this->cashier)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '5',
+                'items' => [],
+            ])
+            ->assertStatus(422);
+
+        $this->assertDatabaseCount('order_items', 1);
+    }
+
+    public function test_a_normal_order_cannot_be_edited_as_draft(): void
+    {
+        $this->actingAs($this->cashier)->postJson('/api/orders', [
+            'payment_type' => 'pay_now',
+            'payment_method' => 'cash',
+            'items' => [['product_id' => $this->product->id, 'qty' => 1]],
+        ])->assertCreated();
+
+        $order = Order::where('status', '!=', OrderStatus::Draft->value)->firstOrFail();
+
+        $this->actingAs($this->cashier)
+            ->putJson("/api/orders/{$order->id}", [
+                'table_number' => '5',
+                'items' => [['product_id' => $this->product->id, 'qty' => 5]],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Pesanan ini bukan draft.');
+
+        // Item asli tidak berubah setelah percobaan edit gagal.
+        $this->assertSame(1, $order->refresh()->items()->firstOrFail()->qty);
+    }
+
+    public function test_editing_a_draft_requires_the_update_permission(): void
+    {
+        $draft = $this->saveDraft();
+        $reader = $this->staff(['transaction.view']);
+
+        $this->actingAs($reader)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '5',
+                'items' => [['product_id' => $this->product->id, 'qty' => 1]],
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_discount_during_draft_edit_requires_the_discount_permission(): void
+    {
+        $draft = $this->saveDraft();
+        $cashierNoDiscount = $this->staff(array_values(array_diff($this->cashierPermissions(), ['pos.discount'])), ['role' => 'cashier']);
+
+        $this->actingAs($cashierNoDiscount)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '5',
+                'discount' => 10,
+                'items' => $draft->items->map(fn ($item) => ['product_id' => $item->product_id, 'qty' => $item->qty])->all(),
+            ])
+            ->assertForbidden();
+    }
 }

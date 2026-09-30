@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Ban, RotateCcw, ShieldAlert } from 'lucide-react';
 import { formatIDR, parseNumber } from '../../api/client';
-import { Swal, confirmAction } from '../../utils/alerts';
+import { Swal, askCorrectionReason, confirmAction } from '../../utils/alerts';
+import { refundableOf, refundableReceiptsOf } from '../../utils/order';
 
 /**
  * Panel koreksi transaksi: pembatalan penuh (void) dan retur sebagian.
@@ -21,25 +22,10 @@ export default function TransactionCorrection({ order, canVoid, canRefund, onVoi
     const [refundOpen, setRefundOpen] = useState(false);
     const [refundRaw, setRefundRaw] = useState('');
 
-    const receipts = order?.invoice?.receipts ?? [];
-
     /** Sisa uang per penerimaan yang masih boleh diretur. */
-    const refundable = useMemo(
-        () =>
-            receipts
-                .map((receipt) => ({
-                    id: receipt.id,
-                    label: receipt.payment_method?.toUpperCase() ?? '-',
-                    amount: Math.max(0, Number(receipt.gross_amount) - Number(receipt.refund_amount ?? 0)),
-                }))
-                .filter((receipt) => receipt.amount > 0),
-        [receipts],
-    );
+    const refundable = useMemo(() => refundableReceiptsOf(order), [order]);
 
-    const refundableTotal = useMemo(
-        () => refundable.reduce((sum, receipt) => sum + receipt.amount, 0),
-        [refundable],
-    );
+    const refundableTotal = useMemo(() => refundableOf(order), [order]);
 
     const voided = order?.status === 'void';
     const canAct = !voided && !busy;
@@ -49,24 +35,8 @@ export default function TransactionCorrection({ order, canVoid, canRefund, onVoi
      * SweetAlert dipakai, bukan modal sendiri, supaya alasan yang diketik kasir
      * tidak hilang saat daftar pesanan di-refetch.
      */
-    const askReason = async (title, intro, confirmLabel) => {
-        const { value } = await Swal.fire({
-            title,
-            html: intro,
-            input: 'text',
-            inputPlaceholder: 'Contoh: pelanggan membatalkan pesanan, input harga keliru',
-            inputAttributes: { maxlength: 255 },
-            showCancelButton: true,
-            confirmButtonText: confirmLabel,
-            cancelButtonText: 'Batal',
-            confirmButtonColor: '#ea580c',
-            cancelButtonColor: '#6b7280',
-            reverseButtons: true,
-            inputValidator: (value) => (value && value.trim() ? null : 'Alasan wajib diisi.'),
-        });
-
-        return value ? value.trim() : null;
-    };
+    const askReason = (title, intro, confirmLabel) =>
+        askCorrectionReason(title, intro, confirmLabel);
 
     const handleVoid = async () => {
         const reason = await askReason(

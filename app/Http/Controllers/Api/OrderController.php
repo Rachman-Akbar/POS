@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentType;
 use App\Events\OrderCreated;
 use App\Events\OrderStatusUpdated;
+use App\Http\Controllers\Api\Concerns\AuthorizesDiscount;
 use App\Http\Controllers\Api\Concerns\SafeBroadcasts;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
@@ -21,6 +22,7 @@ use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
+    use AuthorizesDiscount;
     use SafeBroadcasts;
 
     public function __construct(
@@ -183,6 +185,48 @@ class OrderController extends Controller
     }
 
     /**
+     * Edit isi draft dari halaman detail pesanan.
+     *
+     * Hanya draft yang bisa diubah isinya (menu, jumlah, meja, diskon, PPN).
+     * Transaksi yang sudah diproses dikoreksi lewat endpoint koreksi, yang
+     * permission-nya terpisah dan tercatat di audit log.
+     */
+    public function update(Request $request, Order $order): JsonResponse
+    {
+        $data = $this->validateItems($request);
+
+        $this->authorizeDiscount($request, (float) ($data['discount'] ?? 0));
+
+        try {
+            $order = $this->salesService->updateDraft(
+                order: $order,
+                tableNumber: $data['table_number'] ?? '',
+                items: $data['items'],
+                options: [
+                    'discount' => (float) ($data['discount'] ?? 0),
+                    'tax_rate' => isset($data['tax_rate']) ? (float) $data['tax_rate'] : null,
+                    'notes' => $data['notes'] ?? null,
+                    'customer_id' => $data['customer_id'] ?? null,
+                ],
+            );
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->audit->log(
+            $request,
+            'update',
+            'transaction',
+            null,
+            sprintf('Mengedit draft %s menjadi %d item.', $order->order_number, count($data['items'])),
+            ['status' => $order->status],
+            null,
+        );
+
+        return response()->json(['data' => $order]);
+    }
+
+    /**
      * Continue a draft: reserve stock, issue the invoice, optionally record
      * the payment, and move the order into the normal kitchen flow.
      */
@@ -243,23 +287,6 @@ class OrderController extends Controller
         ], [
             'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
         ]);
-    }
-
-    /**
-     * Diskon mengurangi uang yang benar-benar diterima, jadi diberikan permission
-     * sendiri dan tidak bisa dipakai diam-diam oleh role yang hanya boleh
-     * membaca. Diskon nol tetap boleh supaya kasir tidak terhenti.
-     */
-    private function authorizeDiscount(Request $request, float $discount): void
-    {
-        if ($discount <= 0 || $request->user()->hasPermission('pos.discount')) {
-            return;
-        }
-
-        abort(
-            Response::HTTP_FORBIDDEN,
-            'Anda tidak memiliki hak untuk memberi diskon. Hubungi supervisor.',
-        );
     }
 
     /**

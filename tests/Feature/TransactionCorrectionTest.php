@@ -24,11 +24,12 @@ use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
- * Koreksi transaksi oleh admin: pembatalan (void) dan retur.
+ * Koreksi transaksi oleh admin: memperbaiki isi pesanan, pembatalan (void),
+ * dan retur.
  *
- * Fokus test: uang yang keluar dari kas karena kesalahan kasir selalu bisa
- * ditelusuri (siapa, kapan, berapa, alasan), pembukuan tetap seimbang setelah
- * pembatalan, dan kasir tidak bisa menyentuh endpoint koreksi meski ia tahu
+ * Fokus test: kesalahan input kasir selalu bisa diperbaiki atau ditelusuri
+ * (siapa, kapan, berapa, alasan), pembukuan dan pembayaran tetap utuh setelah
+ * koreksi isi, dan kasir tidak bisa menyentuh endpoint koreksi meski ia tahu
  * URL-nya.
  */
 class TransactionCorrectionTest extends TestCase
@@ -408,6 +409,147 @@ class TransactionCorrectionTest extends TestCase
             ->assertJsonPath('message', 'Pesanan ini sudah dibatalkan, tidak bisa diproses dapur.');
     }
 
+    public function test_cashier_cannot_correct_a_transaction(): void
+    {
+        $order = $this->paidOrder();
+
+        Sanctum::actingAs($this->staff($this->cashierPermissions(), ['role' => 'cashier']));
+
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'notes' => 'Menu ketukik dua kali',
+            'items' => [['product_id' => Product::firstOrFail()->id, 'qty' => 1]],
+        ])
+            ->assertForbidden()
+            ->assertJsonPath('missing_permission', 'transaction.correct');
+
+        $this->assertSame(2, $order->fresh()->items()->firstOrFail()->qty);
+    }
+
+    public function test_correction_requires_a_note(): void
+    {
+        $order = $this->paidOrder();
+
+        Sanctum::actingAs($this->corrector());
+
+        // Tanpa catatan, koreksi tidak bisa ditelusuri: orang yang membaca
+        // audit log tidak akan pernah tahu apa yang sebenarnya salah.
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'items' => [['product_id' => Product::firstOrFail()->id, 'qty' => 1]],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('notes');
+
+        $this->assertSame(2, $order->fresh()->items()->firstOrFail()->qty);
+    }
+
+    public function test_correction_discount_requires_the_discount_permission(): void
+    {
+        $order = $this->paidOrder();
+
+        $withoutDiscount = $this->staff(
+            ['transaction.correct', 'transaction.view.all', 'product.view', 'settings.view'],
+            ['role' => 'supervisor']
+        );
+
+        Sanctum::actingAs($withoutDiscount);
+
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'notes' => 'Menu ketukik dua kali',
+            'discount' => 5_000,
+            'items' => [['product_id' => Product::firstOrFail()->id, 'qty' => 1]],
+        ])->assertForbidden();
+
+        $this->assertSame(0.0, (float) $order->fresh()->discount);
+    }
+
+    public function test_admin_can_correct_a_transaction_that_was_entered_wrong(): void
+    {
+        $order = $this->paidOrder();
+        $product = Product::firstOrFail();
+        $item = $order->items()->firstOrFail();
+
+        $paidBefore = (float) $order->paid_amount;
+        $receivedBefore = (float) $order->invoice->receipts()->sum('gross_amount');
+        $stockBefore = $product->fresh()->stock;
+        $journalBefore = JournalEntry::query()->count();
+        $totalBefore = (float) $order->total_amount;
+
+        $admin = $this->corrector();
+        Sanctum::actingAs($admin);
+
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'table_number' => '9',
+            'notes' => 'Menu ketukik dua kali, sebelumnya 2 jadi 1',
+            'items' => [['product_id' => $product->id, 'qty' => 1]],
+        ])->assertOk()->assertJsonPath('data.order.table_number', '9');
+
+        $order = $order->fresh();
+
+        // Isi pesanan yang diperbaiki: satu item, jumlahnya satu, meja 9.
+        $this->assertSame(1, $order->items()->count());
+        $this->assertSame(1, $order->items()->firstOrFail()->qty);
+        $this->assertSame('9', $order->table_number);
+        $this->assertNotSame($totalBefore, (float) $order->total_amount);
+
+        // Yang sudah tercatat tidak boleh ikut berubah: pembayaran, stok, dan
+        // jurnal. Koreksi isi bukan pembatalan.
+        $this->assertSame(PaymentStatus::Paid->value, $order->payment_status);
+        $this->assertSame($paidBefore, (float) $order->paid_amount);
+        $this->assertSame($receivedBefore, (float) $order->invoice->receipts()->sum('gross_amount'));
+        $this->assertSame($stockBefore, $product->fresh()->stock);
+        $this->assertSame($journalBefore, JournalEntry::query()->count());
+
+        // Struk harus mencetak total yang sama dengan pesanan.
+        $this->assertSame((float) $order->total_amount, (float) $order->invoice->fresh()->total_amount);
+
+        // Catatan koreksi tersimpan di transaksi itu sendiri.
+        $this->assertStringContainsString('Menu ketukik dua kali', (string) $order->notes);
+
+        $log = AuditLog::where('module', 'transaction')->where('action', 'correct')->firstOrFail();
+        $this->assertSame($admin->id, $log->user_id);
+        $this->assertSame('Order', $log->record_type);
+        $this->assertSame((string) $order->id, $log->record_id);
+        $this->assertStringContainsString('Alasan: Menu ketukik dua kali', (string) $log->description);
+    }
+
+    public function test_correction_note_keeps_the_previous_note(): void
+    {
+        $order = $this->paidOrder();
+        $order->update(['notes' => 'Pelanggan minta cepat']);
+
+        Sanctum::actingAs($this->corrector());
+
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'notes' => 'Meja salah input',
+            'items' => $order->items->map(fn ($item) => [
+                'product_id' => $item->product_id,
+                'qty' => $item->qty,
+            ])->all(),
+        ])->assertOk();
+
+        $notes = (string) $order->fresh()->notes;
+
+        $this->assertStringContainsString('Pelanggan minta cepat', $notes);
+        $this->assertStringContainsString('Meja salah input', $notes);
+    }
+
+    public function test_a_voided_transaction_cannot_be_corrected(): void
+    {
+        $order = $this->paidOrder();
+
+        Sanctum::actingAs($this->staff(['transaction.void', 'transaction.view.all'], ['role' => 'admin']));
+        $this->postJson("/api/orders/{$order->id}/void", ['reason' => 'Input kasir salah'])->assertOk();
+
+        Sanctum::actingAs($this->corrector());
+
+        $this->putJson("/api/orders/{$order->id}/corrections", [
+            'notes' => 'Mau dibetulkan lagi',
+            'items' => [['product_id' => Product::firstOrFail()->id, 'qty' => 1]],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Transaksi ini sudah dibatalkan.');
+    }
+
     public function test_seeded_roles_can_and_cannot_correct_transactions(): void
     {
         $this->seed(PermissionSeeder::class);
@@ -426,6 +568,10 @@ class TransactionCorrectionTest extends TestCase
         $this->assertContains('transaction.void', $granted('supervisor'));
         $this->assertContains('transaction.refund', $granted('supervisor'));
 
+        // Memperbaiki isi transaksi yang salah input ikut hak yang sama.
+        $this->assertContains('transaction.correct', $granted('admin'));
+        $this->assertContains('transaction.correct', $granted('supervisor'));
+
         // Admin melihat seluruh transaksi, kasir tidak.
         $this->assertContains('transaction.view.all', $granted('admin'));
         $this->assertContains('transaction.view.all', $granted('supervisor'));
@@ -436,6 +582,7 @@ class TransactionCorrectionTest extends TestCase
 
             $this->assertNotContains('transaction.void', $permissions, "Role {$slug} tidak boleh void.");
             $this->assertNotContains('transaction.refund', $permissions, "Role {$slug} tidak boleh retur.");
+            $this->assertNotContains('transaction.correct', $permissions, "Role {$slug} tidak boleh koreksi isi.");
         }
 
         $this->assertNotContains('transaction.view.all', $granted('kasir'));
@@ -449,6 +596,17 @@ class TransactionCorrectionTest extends TestCase
         $this->assertFalse(
             $legacyAdmin->fresh()->hasPermission('role.delete'),
             'Role Admin tidak memegang `role.delete`, jadi harus tetap ditolak walau kolom `role` warisan berisi `admin`.',
+        );
+    }
+
+    /**
+     * Admin/supervisor yang memegang hak koreksi isi transaksi.
+     */
+    private function corrector(): User
+    {
+        return $this->staff(
+            ['transaction.correct', 'transaction.view.all', 'pos.discount', 'product.view', 'settings.view'],
+            ['role' => 'admin']
         );
     }
 

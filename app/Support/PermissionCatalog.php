@@ -50,6 +50,7 @@ class PermissionCatalog
                 'transaction.view.all' => 'Lihat Transaksi Semua User',
                 'transaction.create' => 'Membuat Pesanan',
                 'transaction.update' => 'Mengubah / Menyelesaikan Pesanan',
+                'transaction.correct' => 'Koreksi Transaksi Salah Input',
                 'transaction.void' => 'Membatalkan Transaksi (Void)',
                 'transaction.refund' => 'Retur / Kembalikan Pembayaran',
             ],
@@ -175,6 +176,7 @@ class PermissionCatalog
         return match ($name) {
             'transaction.view' => 'Melihat pesanan dan transaksi miliknya sendiri.',
             'transaction.view.all' => 'Melihat seluruh transaksi, termasuk milik kasir lain.',
+            'transaction.correct' => 'Memperbaiki isi transaksi yang sudah diproses (menu, jumlah, meja, diskon) ketika kasir salah input, tanpa membatalkan transaksi.',
             'transaction.void' => 'Membatalkan transaksi yang salah, mengembalikan stok, dan reversal jurnal.',
             'transaction.refund' => 'Mengembalikan sebagian atau seluruh pembayaran yang sudah diterima.',
             default => match (true) {

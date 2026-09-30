@@ -44,13 +44,16 @@ Route::middleware(['auth:sanctum', 'user.active'])->group(function (): void {
     Route::post('/orders', [OrderController::class, 'store'])->middleware('permission:transaction.create');
     Route::post('/orders/draft', [OrderController::class, 'storeDraft'])->middleware('permission:transaction.create');
     Route::get('/orders/transactions', [OrderController::class, 'transactions'])->middleware('permission:transaction.view');
+    Route::put('/orders/{order}', [OrderController::class, 'update'])->middleware('permission:transaction.update');
     Route::post('/orders/{order}/finalize', [OrderController::class, 'finalizeDraft'])->middleware('permission:transaction.update');
     Route::delete('/orders/{order}', [OrderController::class, 'destroy'])->middleware('permission:transaction.update');
     Route::get('/orders/{order}', [OrderController::class, 'show'])->middleware('permission:transaction.view');
     Route::post('/orders/{order}/complete', [OrderController::class, 'complete'])->middleware('permission:transaction.update');
 
-    // Koreksi transaksi oleh admin: pembatalan total dan retur pembayaran.
-    // Kasir sengaja tidak diberi permission ini di role bawaannya.
+    // Koreksi transaksi oleh admin: memperbaiki isi pesanan, pembatalan total,
+    // dan retur pembayaran. Kasir sengaja tidak diberi permission ini di role
+    // bawaannya.
+    Route::put('/orders/{order}/corrections', [TransactionCorrectionController::class, 'correct'])->middleware('permission:transaction.correct');
     Route::post('/orders/{order}/void', [TransactionCorrectionController::class, 'void'])->middleware('permission:transaction.void');
     Route::post('/orders/{order}/refunds/{receipt}', [TransactionCorrectionController::class, 'refund'])->middleware('permission:transaction.refund');
 

@@ -35,6 +35,30 @@ export function remainingOf(order) {
 }
 
 /**
+ * Sisa uang per penerimaan pembayaran yang masih boleh diretur.
+ *
+ * Dipakai oleh panel koreksi di detail pesanan (untuk memilih penerimaan) dan
+ * oleh prompt pembatalan di kolom aksi daftar pesanan, supaya angka "uang yang
+ * masih bisa dikembalikan" di kedua tempat tidak pernah berbeda.
+ */
+export function refundableReceiptsOf(order) {
+    const receipts = order?.invoice?.receipts ?? [];
+
+    return receipts
+        .map((receipt) => ({
+            id: receipt.id,
+            label: receipt.payment_method?.toUpperCase() ?? '-',
+            amount: Math.max(0, Number(receipt.gross_amount) - Number(receipt.refund_amount ?? 0)),
+        }))
+        .filter((receipt) => receipt.amount > 0);
+}
+
+/** Total uang yang masih bisa dikembalikan dari sebuah order. */
+export function refundableOf(order) {
+    return refundableReceiptsOf(order).reduce((sum, receipt) => sum + receipt.amount, 0);
+}
+
+/**
  * Order dianggap belum lunas bila masih ada sisa tagihan. Ambang 0.004 dipakai
  * agar pembulatan rupiah tidak membuat order yang sebenarnya lunas ikut
  * terhitung belum lunas.

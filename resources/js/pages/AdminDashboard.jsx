@@ -65,7 +65,7 @@ export default function AdminDashboard() {
     const { data: products = [] } = useQuery({
         queryKey: ['admin-products'],
         queryFn: async () => (await api.get('/products')).data.data,
-        enabled: can('product.view', 'product.favorite'),
+        enabled: can('product.view'),
     });
 
     const { data: methods = [] } = useQuery({
@@ -78,16 +78,6 @@ export default function AdminDashboard() {
         queryKey: ['master-categories'],
         queryFn: async () => (await api.get('/admin/categories')).data.data,
         enabled: can('category.view'),
-    });
-
-    const toggleProductFavorite = useMutation({
-        mutationFn: (product) => api.patch(`/products/${product.id}/favorite`),
-        onMutate: (product) => {
-            queryClient.setQueryData(['admin-products'], (old) =>
-                old?.map((p) => (p.id === product.id ? { ...p, is_favorite: !p.is_favorite } : p)),
-            );
-        },
-        onSettled: () => queryClient.invalidateQueries({ queryKey: ['admin-products'] }),
     });
 
     const saveFlags = useMutation({
@@ -270,7 +260,6 @@ export default function AdminDashboard() {
         { key: 'appearance', label: 'Tampilan', icon: Palette, permission: 'settings.view' },
         { key: 'categories', label: 'Kategori', icon: Tags, count: categories.length, permission: 'category.view' },
         { key: 'products', label: 'Produk', icon: Package, count: products.length, permission: 'product.view' },
-        { key: 'favorites', label: 'Favorit', icon: Star, permission: 'product.favorite' },
         { key: 'customers', label: 'Pelanggan', icon: User, permission: 'customer.view' },
         { key: 'methods', label: 'Metode', icon: CreditCard, count: methods.length, permission: 'payment_method.view' },
         { key: 'accounts', label: 'Kas & Bank', icon: Wallet, count: accounts.length, permission: 'cash.view' },
@@ -284,7 +273,7 @@ export default function AdminDashboard() {
      * yang sering sempit.
      */
     const navGroups = [
-        { key: 'catalog', label: 'Katalog', keys: ['categories', 'products', 'favorites', 'customers'] },
+        { key: 'catalog', label: 'Katalog', keys: ['categories', 'products', 'customers'] },
         { key: 'money', label: 'Pembayaran', keys: ['methods', 'accounts'] },
         { key: 'access', label: 'Akses', keys: ['roles', 'users'] },
         { key: 'system', label: 'Sistem', keys: ['settings', 'appearance'] },
@@ -419,70 +408,13 @@ export default function AdminDashboard() {
 
             {activeNav === 'categories' && <CategoryManager />}
 
-            {activeNav === 'products' && <ProductManager />}
+{activeNav === 'products' && <ProductManager />}
 
             {activeNav === 'customers' && <CustomerManager />}
 
             {activeNav === 'roles' && <RoleManager />}
 
             {activeNav === 'users' && <UserManager />}
-
-            {activeNav === 'favorites' && (
-                <div className="space-y-4">
-                    <div className="card">
-                        <div className="mb-4">
-                            <h3 className="font-bold">Produk Favorit</h3>
-                            <p className="text-sm text-muted">Tandai produk yang tampil pada container Favorit di katalog kasir.</p>
-                        </div>
-
-                        {products.length === 0 ? (
-                            <p className="text-muted text-sm text-center py-8">Belum ada produk aktif.</p>
-                        ) : (
-                            <div className="border border-line rounded-xl overflow-hidden bg-surface">
-                                <table className="w-full">
-                                    <thead className="border-b border-line">
-                                        <tr>
-                                            <th className="table-head">Produk</th>
-                                            <th className="table-head">Kategori</th>
-                                            <th className="table-head text-right">Harga</th>
-                                            <th className="table-head text-center">Favorit</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-line">
-                                        {products.map((product) => (
-                                            <tr key={product.id}>
-                                                <td className="table-cell">
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <div className="w-9 h-9 rounded-lg overflow-hidden shrink-0 bg-surface-2">
-                                                            {product.image ? (
-                                                                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <Package size={16} className="w-full h-full m-auto text-faint" />
-                                                            )}
-                                                        </div>
-                                                        <span className="font-semibold text-sm truncate">{product.name}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="table-cell text-sm text-muted">{product.category ?? 'Lainnya'}</td>
-                                                <td className="table-cell text-right text-accent font-semibold">{formatIDR(product.price)}</td>
-                                                <td className="table-cell text-center">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={!!product.is_favorite}
-                                                        onChange={() => toggleProductFavorite.mutate(product)}
-                                                        title={product.is_favorite ? 'Hapus dari favorit' : 'Jadikan favorit'}
-                                                        className="w-4 h-4 accent-accent cursor-pointer align-middle"
-                                                    />
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
 
             {activeNav === 'methods' && (
                 <div className="space-y-4">

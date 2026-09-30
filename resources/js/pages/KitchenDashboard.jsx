@@ -137,19 +137,27 @@ export default function KitchenDashboard() {
         return [...grouped.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     }, [items]);
 
+    /**
+     * Pencarian header menyaring daftar pesanan sebelum dibagi ke kolom tahap.
+     * Dipakai mode Tabel maupun Board agar hasilnya konsisten: tanpa ini kata
+     * kunci hanya berpengaruh di Tabel, sedangkan Board (tampilan default)
+     * tampak tidak bereaksi.
+     */
+    const filteredOrders = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return q ? orders.filter((o) => o.order_number.toLowerCase().includes(q)) : orders;
+    }, [orders, query]);
+
     const boardGroups = STAGES.map((stage) => ({
         ...stage,
-        orders: orders.filter((o) => o.items.some((i) => i.status === stage.key)),
+        orders: filteredOrders.filter((o) => o.items.some((i) => i.status === stage.key)),
     }));
 
     // Saat satu status dipilih, board menyempit hanya ke kolom status itu dan
     // kolomnya melebar memenuhi layar.
     const shownStages = focusStage ? boardGroups.filter((s) => s.key === focusStage) : boardGroups;
 
-    const filteredOrders = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        return q ? orders.filter((o) => o.order_number.toLowerCase().includes(q)) : orders;
-    }, [orders, query]);
+    const noSearchMatch = query.trim() !== '' && filteredOrders.length === 0;
 
     const updateStatus = async (item, status) => {
         if (item.status === status) return;
@@ -420,6 +428,10 @@ export default function KitchenDashboard() {
                 <div className="card rounded-none text-muted">Memuat SPK...</div>
             ) : view === 'table' ? (
                 renderGroupedTable()
+            ) : noSearchMatch ? (
+                <div className="card rounded-none text-muted text-center py-14">
+                    Tidak ada pesanan dengan nomor tersebut.
+                </div>
             ) : (
                 <div className={focusStage ? '' : 'grid gap-x-4 gap-y-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-4'}>
                     {shownStages.map((stage) => {

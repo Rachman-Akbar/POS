@@ -47,3 +47,30 @@ export function confirmAction(title, text = '', confirmLabel = 'Ya, lanjutkan') 
         ...theme,
     });
 }
+
+/**
+ * Minta alasan singkat untuk sebuah koreksi.
+ *
+ * Backend menyimpan alasan koreksi di audit log dan ada yang mewajibkan
+ * isinya, jadi dialog ini tidak pernah menerima alasan kosong. Dipakai dari
+ * detail pesanan maupun dari kolom aksi daftar pesanan supaya bentuk
+ * permintaannya selalu sama.
+ *
+ * @returns {Promise<string|null>} alasannya, atau null bila dibatalkan
+ */
+export async function askCorrectionReason(title, html, confirmLabel = 'Ya, lanjutkan') {
+    const { value } = await Swal.fire({
+        title,
+        html,
+        input: 'text',
+        inputPlaceholder: 'Contoh: pelanggan membatalkan pesanan, input harga keliru',
+        inputAttributes: { maxlength: 255 },
+        showCancelButton: true,
+        confirmButtonText: confirmLabel,
+        cancelButtonText: 'Batal',
+        ...theme,
+        inputValidator: (value) => (value && value.trim() ? null : 'Alasan wajib diisi.'),
+    });
+
+    return value ? value.trim() : null;
+}

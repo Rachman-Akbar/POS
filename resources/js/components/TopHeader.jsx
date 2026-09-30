@@ -17,14 +17,22 @@ import {
 
 export { VIEW_MODES } from './ViewModeSwitch';
 
-// Halaman yang bisa dibuka. Kasir, dapur, dan pelayan tetap publik; admin
-// hanya ditampilkan bila user yang sedang login memang berhak.
-export const APP_PAGES = [
+// Halaman kerja tetap (fungsi harian): bisa dikunjungi oleh semua peran yang
+// relevan, jadi ditempatkan di dropdown halaman di sebelah icon profil.
+export const MAIN_PAGES = [
     { path: '/kasir', label: 'Kasir', icon: Receipt, permissions: CASHIER_PERMISSIONS },
     { path: '/koki', label: 'Dapur', icon: ChefHat, permissions: KITCHEN_PERMISSIONS },
     { path: '/waiters', label: 'Pelayan', icon: UtensilsCrossed, permissions: WAITER_PERMISSIONS },
+];
+
+// Halaman khusus yang hanya bisa dikunjungi ketika user memang berhak (admin,
+// super admin, dan sejenisnya). Muncul di dropdown profil, bukan di dropdown
+// halaman, supaya menu harian tetap berisi fungsi tetap saja.
+export const SPECIAL_PAGES = [
     { path: '/admin', label: 'Admin', icon: ShieldCheck, permissions: ADMIN_PERMISSIONS },
 ];
+
+export const APP_PAGES = [...MAIN_PAGES, ...SPECIAL_PAGES];
 
 function currentPage(pathname) {
     return APP_PAGES.find((item) => pathname.startsWith(item.path)) ?? APP_PAGES[0];
@@ -62,6 +70,7 @@ export default function TopHeader({
     const page = currentPage(pathname);
     const dropdownLabel = navItems.find((item) => item.key === activeNav)?.label ?? navLabel;
 
+    // Semua pindah halaman/role dikumpulkan di satu tempat: dropdown profil.
     const pages = APP_PAGES.filter((item) => !item.permissions || canAny(...item.permissions));
     const displayName = user?.name ?? 'Tamu';
     const roleLabel = user
