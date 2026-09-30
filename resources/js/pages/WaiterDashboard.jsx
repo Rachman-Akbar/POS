@@ -10,6 +10,7 @@ import { StatusBadge, PaymentBadge } from '../components/badges';
 import { api, formatIDR } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
 import { notifySuccess, notifyError } from '../utils/alerts';
+import { tableLabel } from '../utils/order';
 
 export default function WaiterDashboard() {
     const [tab, setTab] = useState('antar');
@@ -143,7 +144,7 @@ export default function WaiterDashboard() {
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <span className="font-bold">{order.order_number}</span>
-                                            <span className="badge badge-pending ml-2">Meja {order.table_number ?? '-'}</span>
+                                            <span className="badge badge-pending ml-2">{tableLabel(order.table_number)}</span>
                                         </div>
                                         <div className="flex gap-1">
                                             <StatusBadge status={order.status} />

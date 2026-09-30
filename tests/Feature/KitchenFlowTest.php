@@ -44,40 +44,93 @@ class KitchenFlowTest extends TestCase
         return Order::firstOrFail();
     }
 
+    private function createDraft(): Order
+    {
+        $cashier = $this->staff($this->cashierPermissions(), ['role' => 'cashier']);
+
+        $response = $this->actingAs($cashier)->postJson('/api/orders/draft', [
+            'table_number' => '3',
+            'items' => [['product_id' => $this->product->id, 'qty' => 1]],
+        ]);
+
+        $response->assertCreated();
+
+        return Order::firstOrFail();
+    }
+
     /**
-     * Produksi dapur punya empat tahap: pesanan masuk sebagai "Dipesan", lalu
-     * Dimasak, Dikirim, Selesai. Tidak ada tahap "Draf" karena draft hanya
-     * menampung transaksi sementara dan tidak pernah masuk papan dapur.
+     * Alur tahap item menu: Draft → Diproses → Dimasak → Dikirim → Selesai.
+     *
+     * Tahap `draft` dipakai item milik pesanan yang masih draft. Item itu
+     * belum pernah masuk dapur dan tidak boleh tampil di papan; saat draft
+     * diselesaikan, finalizeDraft() menaikkannya ke `pending` (Diproses).
      *
      * `cancelled` bukan tahap produksi: itu penanda yang dibuat admin saat
      * membatalkan transaksi, supaya dapur berhenti mengerjakan barang yang
      * sudah dibatalkan.
      */
-    public function test_item_status_exposes_four_production_stages(): void
+    public function test_item_status_exposes_five_production_stages(): void
     {
         $this->assertSame(
-            ['pending', 'cooking', 'sent', 'done', 'cancelled'],
+            ['draft', 'pending', 'cooking', 'sent', 'done', 'cancelled'],
             array_column(ItemStatus::cases(), 'value'),
         );
 
-        // Hanya empat tahap pertama yang punya tahap berikutnya.
+        // Hanya lima tahap pertama yang punya tahap berikutnya.
         $this->assertSame(
-            ['cooking', 'sent', 'done', null, null],
+            ['pending', 'cooking', 'sent', 'done', null, null],
             array_map(fn (ItemStatus $case): ?string => $case->next()?->value, ItemStatus::cases()),
         );
 
         $this->assertSame(
-            ['Dipesan', 'Dimasak', 'Dikirim', 'Selesai', 'Dibatalkan'],
+            ['Draft', 'Diproses', 'Dimasak', 'Dikirim', 'Selesai', 'Dibatalkan'],
             array_map(fn (ItemStatus $status) => $status->label(), ItemStatus::cases()),
         );
     }
 
     public function test_production_stages_advance_in_order(): void
     {
+        $this->assertSame(ItemStatus::Pending, ItemStatus::Draft->next());
         $this->assertSame(ItemStatus::Cooking, ItemStatus::Pending->next());
         $this->assertSame(ItemStatus::Sent, ItemStatus::Cooking->next());
         $this->assertSame(ItemStatus::Done, ItemStatus::Sent->next());
         $this->assertNull(ItemStatus::Done->next());
+    }
+
+    public function test_draft_items_never_reach_the_kitchen_board(): void
+    {
+        $draft = $this->createDraft();
+
+        $this->assertSame(
+            ItemStatus::Draft->value,
+            $draft->items()->firstOrFail()->status,
+            'Item pesanan draft harus berstatus draft, bukan pending.',
+        );
+
+        $response = $this->actingAs($this->kitchen)->getJson('/api/kitchen/items');
+        $response->assertOk()
+            ->assertJsonCount(0, 'data.waiting')
+            ->assertJsonCount(0, 'data.cooking')
+            ->assertJsonCount(0, 'data.sent')
+            ->assertJsonCount(0, 'data.done');
+    }
+
+    /**
+     * Item draft tidak boleh bisa diubah tahapnya lewat papan dapur, karena
+     * item itu belum pernah masuk produksi sama sekali. Tidak ada endpoint
+     * yang bisa membuat draft item tampil di papan sebagai "menunggu".
+     */
+    public function test_kitchen_cannot_change_a_draft_item_status(): void
+    {
+        $draft = $this->createDraft();
+        $item = $draft->items()->firstOrFail();
+
+        $this->actingAs($this->kitchen)
+            ->patchJson("/api/kitchen/items/{$item->id}/status", ['status' => ItemStatus::Cooking->value])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Item draft belum diproses dan tidak bisa diubah tahapnya.');
+
+        $this->assertSame(ItemStatus::Draft->value, $item->refresh()->status);
     }
 
     public function test_new_order_items_enter_the_kitchen_as_dipesan(): void

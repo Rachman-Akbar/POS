@@ -24,7 +24,9 @@ class SettingSeeder extends Seeder
             ['key' => 'pos.cashier_enable_customer', 'group' => 'pos', 'value' => 'true', 'label' => 'Data Pelanggan (Perorangan / Badan Usaha)'],
             ['key' => 'pos.cashier_enable_ppn', 'group' => 'pos', 'value' => 'true', 'label' => 'Penerapan PPN'],
             ['key' => 'pos.cashier_enable_prepay', 'group' => 'pos', 'value' => 'false', 'label' => 'Sistem Bayar Di Muka'],
-            ['key' => 'pos.table_numbers', 'group' => 'pos', 'value' => '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20', 'label' => 'Daftar Nomor Meja'],
+            // Entri angka tampil sebagai "Meja N", entri teks dipakai apa adanya
+            // ("Take Away"), jadi opsi tanpa meja tidak perlu lagi.
+            ['key' => 'pos.table_numbers', 'group' => 'pos', 'value' => 'Take Away,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20', 'label' => 'Daftar Meja'],
             ['key' => 'pos.category_order', 'group' => 'pos', 'value' => '[]', 'label' => 'Urutan Kategori'],
             ['key' => 'app.theme_mode', 'group' => 'app', 'value' => 'light', 'label' => 'Mode Tampilan (light/dark/system)'],
             ['key' => 'app.theme_accent', 'group' => 'app', 'value' => 'system', 'label' => 'Warna Aksen (system/orange/blue/emerald/purple/rose/teal/pink/slate)'],

@@ -61,6 +61,8 @@ class AdminSettingsTest extends TestCase
 
         $tables = $response->json('data.table_numbers');
         $this->assertContains('1', $tables);
+        // "Take Away" ikut jadi pilihan meja bawaan, terpisah dari nomor meja.
+        $this->assertContains('Take Away', $tables);
     }
 
     public function test_admin_settings_expose_default_appearance(): void

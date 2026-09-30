@@ -106,7 +106,7 @@ class SalesService
                 'notes' => $options['notes'] ?? null,
             ]);
 
-            [$subtotal] = $this->attachItems($order, $items, reserveStock: false);
+            [$subtotal] = $this->attachItems($order, $items, reserveStock: false, itemStatus: ItemStatus::Draft);
             $this->applyTotals($order, $subtotal, $options);
 
             return $order->fresh(['items.product', 'invoice', 'customer']);
@@ -143,6 +143,11 @@ class SalesService
                 $product = Product::where('is_active', true)->findOrFail($item->product_id);
                 $this->decrementStock($product, $item->qty);
                 $cogs += $item->qty * $product->cost_price;
+
+                // Draft yang diselesaikan baru masuk produksi, jadi itemnya
+                // naik dari Draft ke Pending ("Diproses") dan baru tampil di
+                // papan dapur.
+                $item->update(['status' => ItemStatus::Pending->value]);
             }
 
             $invoice = $this->issueInvoice($locked, $cogs);
@@ -271,7 +276,14 @@ class SalesService
     {
         $order->items()->delete();
 
-        [$subtotal] = $this->attachItems($order, $items, reserveStock: false);
+        // Editor draft menulis ulang isi pesanan yang masih Draft, sedangkan
+        // koreksi menulis ulang isi pesanan yang sudah diproses. Item baru
+        // mengikuti tahap itu supaya tidak ikut masuk antrean dapur.
+        $itemStatus = $order->status === OrderStatus::Draft->value
+            ? ItemStatus::Draft
+            : ItemStatus::Pending;
+
+        [$subtotal] = $this->attachItems($order, $items, reserveStock: false, itemStatus: $itemStatus);
 
         $order->update([
             'table_number' => $tableNumber ?: null,
@@ -334,8 +346,12 @@ class SalesService
      * @param  array<int, array{qty: int, product_id: int, notes?: string|null}>  $items
      * @return array{0: float, 1: float}
      */
-    private function attachItems(Order $order, array $items, bool $reserveStock): array
-    {
+    private function attachItems(
+        Order $order,
+        array $items,
+        bool $reserveStock,
+        ItemStatus $itemStatus = ItemStatus::Pending,
+    ): array {
         $subtotal = 0.0;
         $cogs = 0.0;
 
@@ -352,6 +368,10 @@ class SalesService
                 'product_id' => $product->id,
                 'qty' => $qty,
                 'price' => $product->price,
+                // Item pesanan draft berstatus Draft dan tidak pernah masuk
+                // dapur. Saat draft diselesaikan, finalizeDraft() menaikkan
+                // nya ke Pending ("Diproses").
+                'status' => $itemStatus->value,
                 'notes' => $line['notes'] ?? null,
             ]);
 

@@ -135,6 +135,56 @@ class DraftFlowTest extends TestCase
             ->assertJsonPath('data.0.invoice', null);
     }
 
+    /**
+     * Item pesanan draft berstatus `draft` dan tidak pernah masuk dapur. Saat
+     * draft diselesaikan, itemnya naik ke `pending` (Diproses) supaya baru
+     * saat itu muncul di papan dapur.
+     */
+    public function test_draft_items_are_draft_until_the_draft_is_finalized(): void
+    {
+        $draft = $this->saveDraft();
+
+        $this->assertSame(
+            ItemStatus::Draft->value,
+            $draft->items()->firstOrFail()->status,
+            'Item pesanan draft harus berstatus draft, bukan pending.',
+        );
+
+        $this->actingAs($this->cashier)
+            ->postJson("/api/orders/{$draft->id}/finalize", [
+                'payment_method' => 'cash',
+                'paid_amount' => $draft->total_amount,
+            ])
+            ->assertOk();
+
+        $this->assertSame(
+            ItemStatus::Pending->value,
+            $draft->fresh()->items()->firstOrFail()->status,
+            'Item draft harus naik ke pending (Diproses) begitu draft diselesaikan.',
+        );
+    }
+
+    /**
+     * Menyimpan ulang isi draft tidak boleh mengubah tahap item: selama masih
+     * draft, itemnya tetap `draft`.
+     */
+    public function test_updating_a_draft_keeps_its_items_marked_as_draft(): void
+    {
+        $draft = $this->saveDraft();
+
+        $this->actingAs($this->cashier)
+            ->putJson("/api/orders/{$draft->id}", [
+                'table_number' => '7',
+                'items' => [['product_id' => $this->product->id, 'qty' => 4]],
+            ])
+            ->assertOk();
+
+        $updated = $draft->fresh();
+        $this->assertSame('7', $updated->table_number);
+        $this->assertSame(4, $updated->items()->firstOrFail()->qty);
+        $this->assertSame(ItemStatus::Draft->value, $updated->items()->firstOrFail()->status);
+    }
+
     public function test_finalizing_a_draft_issues_the_invoice_and_sends_it_to_the_kitchen(): void
     {
         $draft = $this->saveDraft(2);

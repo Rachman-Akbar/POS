@@ -7,6 +7,29 @@
  */
 
 /** Kunci filter untuk pesanan yang masih berstatus draft. */
+/**
+ * Label meja yang ditampilkan ke kasir.
+ *
+ * Sumbernya bisa entri pengaturan (angka polos seperti `1`) atau nilai yang
+ * sudah tersimpan di `orders.table_number` (sudah berawalan `Meja `). Entri
+ * angka diberi awalan "Meja", sisanya dipakai apa adanya supaya "Take Away"
+ * tidak tampil menjadi "Meja Take Away".
+ *
+ * Idempoten: aman dijalankan berulang pada nilai yang sudah berawalan "Meja ".
+ *
+ * @param {string|int|null} entry
+ * @return {string}
+ */
+export function tableLabel(entry) {
+    const value = String(entry ?? '').trim();
+
+    if (value === '') {
+        return '-';
+    }
+
+    return /^\d+$/.test(value) ? `Meja ${value}` : value;
+}
+
 export const DRAFT_FILTER = 'draft';
 
 /** Kunci filter untuk pesanan yang sudah dibatalkan. */
@@ -95,14 +118,16 @@ export function matchesPaymentFilter(order, filter) {
 }
 
 /**
- * Tahap proses sebuah pesanan untuk filter & badge. Draft selalu jadi "Draft"
- * (belum diproses), pesanan yang dibatalkan jadi "Dibatalkan", dan sisanya
- * diturunkan dari status item terendah; pesanan tanpa item dianggap masih
- * Dipesan.
+ * Tahap proses sebuah pesanan untuk filter & badge.
  *
- * Item yang dibatalkan diabaikan: pembatalan menandai seluruh item pesanan itu
- * `cancelled`, sehingga memakainya untuk menentukan tahap akan membuat pesanan
- * yang sudah dibatalkan terlihat seperti masih berjalan di dapur.
+ * Alur tahap: Draft → Diproses (pending) → Dimasak → Dikirim → Selesai.
+ * Pesanan draft selalu "Draft", pesanan yang dibatalkan "Dibatalkan", dan
+ * sisanya diturunkan dari status item paling awal yang masih berjalan; item
+ * yang semuanya selesai menghasilkan "Selesai".
+ *
+ * Item `cancelled` diabaikan: void menandai seluruh item pesanan itu
+ * `cancelled`, sehingga memakainya untuk menentukan tahap akan membuat
+ * pesanan yang sudah dibatalkan terlihat seperti masih berjalan di dapur.
  */
 export function orderProcessStatus(order) {
     if (isDraftOrder(order)) return DRAFT_FILTER;
@@ -110,11 +135,41 @@ export function orderProcessStatus(order) {
 
     const items = (order?.items ?? []).filter((item) => item.status !== 'cancelled');
     if (items.length === 0) return 'pending';
+
+    // Item yang masih `draft` berarti pesanan ini belum masuk produksi meski
+    // status order-nya sudah bukan draft, jadi tahapnya masih Draft.
+    if (items.some((item) => item.status === 'draft')) return DRAFT_FILTER;
+
     if (items.every((item) => item.status === 'done')) return 'done';
     if (items.some((item) => item.status === 'pending')) return 'pending';
     if (items.some((item) => item.status === 'cooking')) return 'cooking';
 
     return 'sent';
+}
+
+/**
+ * Tanggal pesanan untuk tabel, format ringkas `dd MMM, HH.mm`.
+ *
+ * @param {string|null} value
+ * @return {string}
+ */
+export function formatOrderDate(value) {
+    if (!value) {
+        return '-';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return date.toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 /** True bila pesanan sudah dibatalkan admin. */

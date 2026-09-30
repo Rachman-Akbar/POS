@@ -20,11 +20,14 @@ class KitchenController extends Controller
     /**
      * Kitchen display — all order items still being produced, grouped by status.
      * Drafts are excluded: a draft is an unprocessed order that has not been
-     * finalized, so it has not reached the kitchen.
+     * finalized, so it has not reached the kitchen. Item berstatus Draft juga
+     * dikecualikan secara eksplisit supaya papan dapur tetap bersih walau
+     * ada item draft yang somehow menempel pada pesanan non-draft.
      */
     public function index(): JsonResponse
     {
         $items = OrderItem::whereHas('order', fn ($query) => $query->where('status', OrderStatus::Pending->value))
+            ->where('status', '!=', ItemStatus::Draft->value)
             ->with(['product', 'order'])
             ->orderBy('created_at')
             ->get();

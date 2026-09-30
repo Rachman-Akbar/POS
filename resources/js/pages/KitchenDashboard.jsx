@@ -5,7 +5,8 @@ import Layout from '../components/Layout';
 import { api } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
 import { notifyError } from '../utils/alerts';
-import { ITEM_STATUS } from '../components/badges';
+import { ITEM_STATUS, ITEM_STATUS_FLOW } from '../components/badges';
+import { tableLabel } from '../utils/order';
 
 const STAGES = [
     { key: 'pending', label: 'Dipesan', band: 'bg-gray-600' },
@@ -45,11 +46,21 @@ const formatTime = (value, withDate = false) => {
  * kelihatan. Warna di sini mengikuti tahap agar daftar isi selalu terbaca.
  */
 const STATUS_OPTION_TONE = {
+    draft: 'bg-gray-100 text-gray-500',
     pending: 'bg-gray-100 text-gray-800',
     cooking: 'bg-amber-100 text-amber-900',
     sent: 'bg-blue-100 text-blue-900',
     done: 'bg-emerald-100 text-emerald-900',
 };
+
+/**
+ * Tahap yang boleh dipilih koki.
+ *
+ * `draft` tidak bisa dipilih: item draft memang tidak pernah sampai di dapur,
+ * dan memaksanya akan membuat item hilang dari papan. `cancelled` bukan tahap
+ * produksi, hanya penanda void, jadi tidak bisa dipilih manual.
+ */
+const SELECTABLE_STATUSES = ITEM_STATUS_FLOW.filter((key) => key !== 'draft');
 
 /**
  * Editor status satu menu, dipakai di mode Kanban Board maupun Tabel.
@@ -68,9 +79,9 @@ function ItemStatusSelect({ item, onChange, className = '' }) {
                 className={`status-select status-${item.status} !pr-4`}
                 title="Ubah status menu"
             >
-                {Object.entries(ITEM_STATUS).map(([key, meta]) => (
+                {SELECTABLE_STATUSES.map((key) => (
                     <option key={key} value={key} className={STATUS_OPTION_TONE[key]}>
-                        {meta.label}
+                        {ITEM_STATUS[key].label}
                     </option>
                 ))}
             </select>
@@ -252,7 +263,7 @@ export default function KitchenDashboard() {
                         <span className="w-3 shrink-0 text-center font-black">{open ? '−' : '+'}</span>
                         <span className="text-sm font-black tracking-wide">{order.order_number}</span>
                         <span className={`text-xs truncate ${wide ? 'opacity-80' : 'text-muted'}`}>
-                            Meja {order.table_number ?? '-'}
+                            {tableLabel(order.table_number)}
                         </span>
                     </button>
                     {!wide && (
@@ -329,7 +340,7 @@ export default function KitchenDashboard() {
                                                 {order.order_number}
                                             </button>
                                             <span className="text-white/80 text-[11px] font-semibold whitespace-nowrap">
-                                                Meja {order.table_number ?? '-'}
+                                                {tableLabel(order.table_number)}
                                             </span>
                                             <span className="text-white/80 text-[11px] font-semibold">
                                                 {doneCount}/{order.items.length} selesai
@@ -386,7 +397,7 @@ export default function KitchenDashboard() {
 
                     <div className="px-4 py-3 flex items-center justify-between border-b border-line">
                         <div className="text-sm font-semibold">
-                            Meja {selectedOrder.table_number ?? '-'}
+                            {tableLabel(selectedOrder.table_number)}
                             <span className="block text-[11px] text-muted font-normal">{formatTime(selectedOrder.created_at, true)}</span>
                         </div>
                         <span className="text-xs text-muted">{doneCount}/{selectedOrder.items.length} selesai</span>

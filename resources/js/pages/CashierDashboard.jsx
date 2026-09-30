@@ -4,7 +4,7 @@ import {
     Printer, ReceiptText, Check,
     Minus, Plus, ShoppingCart, UtensilsCrossed, AlertCircle,
     Save, ChevronRight, ClipboardList, ChefHat, Trash2,
-    Ban, Eye, Pencil, Wallet, X, QrCode,
+    Ban, Pencil, Wallet, X, QrCode,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ProductCatalog, { ALL_CATEGORIES, catalogSectionKeys } from '../components/ProductCatalog';
@@ -24,7 +24,7 @@ import { notifySuccess, notifyError, Swal, askCorrectionReason, confirmAction } 
 import {
     DRAFT_FILTER, isDraftOrder, isUnpaidOrder, isVoidedOrder, orderProcessStatus,
     receivedOf, refundableOf, remainingOf, VOID_FILTER,
-    PAYMENT_FILTER, paymentFilterOf, matchesPaymentFilter,
+    PAYMENT_FILTER, paymentFilterOf, matchesPaymentFilter, tableLabel, formatOrderDate,
 } from '../utils/order';
 
 /** Pilihan filter status pembayaran di tabel Pesanan. */
@@ -724,7 +724,7 @@ export default function CashierDashboard() {
             `======= STRUK - ${settings?.store_name ?? 'POS'} =======`,
             `No Faktur : ${order.invoice?.invoice_number ?? '-'}`,
             `No Pesanan: ${order.order_number}`,
-            `Meja      : ${order.table_number ?? '-'}`,
+            `Meja      : ${tableLabel(order.table_number)}`,
             `Pelanggan : ${customerLabel}`,
             '---------------------------',
             // Order yang baru dibuat belum tentu semua relasi ikut termuat, jadi
@@ -776,6 +776,11 @@ export default function CashierDashboard() {
     useEffect(() => {
         localStorage.setItem('cashboard.tab', tab);
     }, [tab]);
+
+    // Satu handler untuk membuka/menutup halaman Cek Pesanan. Dipakai oleh
+    // tombol di panel "Rincian Pesanan" dan oleh tombol silang di header
+    // Cek Pesanan, jadi keduanya tidak bisa berbeda arti.
+    const toggleCartView = () => setTab(visibleTab === 'cart' ? 'kasir' : 'cart');
 
     const onOrderList = visibleTab === 'pesanan' && !onOrderDetail;
     // Papan Dapur tidak punya katalog: pencarian produk dan filter kategori
@@ -879,7 +884,7 @@ export default function CashierDashboard() {
             onClear={resetCheckout}
             onSubmit={submitOrder}
             onSaveDraft={saveDraft}
-            onViewChange={() => setTab(visibleTab === 'cart' ? 'kasir' : 'cart')}
+            onViewChange={toggleCartView}
             cartViewOpen={visibleTab === 'cart'}
             editingOrder={editingOrder}
             editingIsDraft={editingIsDraft}
@@ -971,17 +976,20 @@ export default function CashierDashboard() {
                                 <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2 shrink-0">
                                     <ShoppingCart size={16} /> Cek Pesanan
                                 </h3>
-                                <span className="badge badge-pending">{cart.length} item</span>
-                                {/* Tutup ditandai silang dan duduk tepat di sebelah
-                                    jumlah item, satu baris dengan judul, supaya
-                                    kasir tidak perlu mencari tombol kembali ke
-                                    katalog. */}
+                                {/* Jumlah item didorong ke kanan lalu silang
+                                    merah menempel persis di sebelahnya: silang
+                                    berarti "keluar dari Cek Pesanan", jadi warna
+                                    merahnya jadi penanda, bukan sekadar tombol
+                                    abu-abu yang netral. */}
+                                <span className="ml-auto badge badge-pending shrink-0 tabular-nums">
+                                    {cart.reduce((sum, line) => sum + line.qty, 0)} item
+                                </span>
                                 <button
                                     type="button"
-                                    onClick={onViewChange}
+                                    onClick={toggleCartView}
                                     title="Tutup Cek Pesanan"
                                     aria-label="Tutup Cek Pesanan"
-                                    className="ml-auto btn-icon !w-6 !h-6 !rounded-md text-muted hover:bg-surface-2 hover:text-content transition-colors cursor-pointer shrink-0"
+                                    className="btn-icon !w-6 !h-6 !rounded-md text-negative hover:bg-red-600 hover:text-white transition-colors cursor-pointer shrink-0"
                                 >
                                     <X size={14} />
                                 </button>
@@ -1000,7 +1008,9 @@ export default function CashierDashboard() {
                         </div>
                     </div>
 
-                    {checkoutSidebar}
+                    <div className="min-w-0 xl:overflow-y-auto scrollbar-thin xl:pr-[10px]">
+                        {checkoutSidebar}
+                    </div>
                 </div>
             )}
 
@@ -1066,8 +1076,9 @@ export default function CashierDashboard() {
                             <table className="w-full">
                                 <thead className="border-b border-line">
                                     <tr>
-                                        <th className={HEAD}>No. Pesanan</th>
+                                        <th className={HEAD}>No pesanan</th>
                                         <th className={HEAD}>Nama Pelanggan</th>
+                                        <th className={HEAD}>Tanggal</th>
                                         <th className={HEAD_RIGHT}>Bayar</th>
                                         <th className={HEAD_RIGHT}>Lunas</th>
                                         <th className={HEAD_CENTER}>Proses</th>
@@ -1126,20 +1137,27 @@ export default function CashierDashboard() {
                                                         <div className="text-[11px] text-muted">Draft · tanpa faktur</div>
                                                     )}
                                                     <div className="text-[11px] text-muted">
-                                                        Meja {order.table_number ?? '-'}
+                                                        {tableLabel(order.table_number)}
                                                     </div>
                                                 </td>
+                                                {/* Kolom ini khusus nama pelanggan.
+                                                    Rincian menu tidak
+                                                    ditampilkan di sini supaya
+                                                    nama panjang tidak ikut
+                                                    mendorong isi lain; daftar
+                                                    menu tersedia di halaman
+                                                    detail pesanan. */}
                                                 <td className={CELL}>
                                                     <div className="text-xs font-semibold">
                                                         {customer || 'Pelanggan Umum'}
                                                     </div>
-                                                    <div className="text-[11px] text-muted">
-                                                        {(order.items ?? [])
-                                                            .map((item) => `${item.qty}\u00d7 ${item.product?.name}`)
-                                                            .join(', ') || '-'}
-                                                    </div>
                                                     <div className="text-[11px] text-muted font-semibold">
                                                         {formatIDR(order.total_amount)}
+                                                    </div>
+                                                </td>
+                                                <td className={CELL}>
+                                                    <div className="text-[11px] text-muted tabular-nums whitespace-nowrap">
+                                                        {formatOrderDate(order.created_at)}
                                                     </div>
                                                 </td>
                                                 <td className={`${CELL_RIGHT} text-positive`}>
@@ -1164,18 +1182,14 @@ export default function CashierDashboard() {
                                                     )}
                                                 </td>
                                                 <td className={`table-cell text-right ${COL}`}>
+                                                    {/* Tombol "lihat detail" tidak
+                                                        ada lagi: seluruh baris
+                                                        sudah bisa diklik dan
+                                                        bisa difokus lewat
+                                                        keyboard, jadi ikon mata
+                                                        hanya mengulang aksi
+                                                        yang sama. */}
                                                     <div className="flex items-center justify-end gap-1">
-                                                        <button
-                                                            className="btn btn-ghost !px-2 !py-1.5"
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                setDetailOrderId(order.id);
-                                                            }}
-                                                            title="Lihat detail pesanan"
-                                                        >
-                                                            <Eye size={14} />
-                                                        </button>
-
                                                         {!draft && (
                                                             <button
                                                                 className="btn btn-ghost !px-2 !py-1.5"
@@ -1270,7 +1284,7 @@ export default function CashierDashboard() {
                                                             {item.qty}\u00d7 {item.product?.name}
                                                         </div>
                                                         <div className="text-[11px] text-muted truncate">
-                                                            Meja {item.order?.table_number ?? '-'} \u00b7{' '}
+                                                            {tableLabel(item.order?.table_number)} \u00b7{' '}
                                                             {item.order?.order_number ?? '-'}
                                                         </div>
                                                     </div>
@@ -1548,12 +1562,11 @@ function CheckoutPanel({
                                 <span className="label !mb-0 w-20 shrink-0">Meja</span>
                                 <div className="flex-1 min-w-0">
                                     <SearchSelect
-                                        options={tableNumbers.map((num) => ({ value: `Meja ${num}`, label: `Meja ${num}` }))}
+                                        options={tableNumbers.map((num) => ({ value: tableLabel(num), label: tableLabel(num) }))}
                                         value={table}
                                         onChange={setTable}
-                                        placeholder="Cari nomor meja..."
-                                        emptyLabel="Nomor meja tidak ditemukan."
-                                        allLabel="Tanpa meja"
+                                        placeholder="Cari meja..."
+                                        emptyLabel="Meja tidak ditemukan."
                                     />
                                 </div>
                             </div>

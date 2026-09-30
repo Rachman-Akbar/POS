@@ -255,17 +255,6 @@ const HeroView = ({ items, onOpen, onAdd, showStock, showSku = true, height = 'c
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
                     <span className="absolute top-4 left-4 badge bg-white/90 text-gray-700">{product.category ?? 'Lainnya'} {product.is_favorite ? '· Favorit' : ''}</span>
-                    {/* Kode barang di pojok kanan atas gambar. Tombol "+"
-                        digeser ke bawahnya supaya tidak saling menutupi. */}
-                    {showSku && product.sku && (
-                        <span
-                            className="absolute top-4 right-4 max-w-[60%] truncate rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white backdrop-blur-sm"
-                            title={`Kode barang: ${product.sku}`}
-                        >
-                            {product.sku}
-                        </span>
-                    )}
-
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -273,12 +262,22 @@ const HeroView = ({ items, onOpen, onAdd, showStock, showSku = true, height = 'c
                         }}
                         disabled={out}
                         title={out ? 'Stok habis' : 'Tambah ke transaksi'}
-                        className={`absolute right-4 w-10 h-10 rounded-full bg-white text-accent hover:bg-accent hover:text-on-accent flex items-center justify-center transition-colors disabled:opacity-50 ${
-                            showSku && product.sku ? 'top-[3.25rem]' : 'top-4'
-                        }`}
+                        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white text-accent hover:bg-accent hover:text-on-accent flex items-center justify-center transition-colors disabled:opacity-50"
                     >
                         <Plus size={20} />
                     </button>
+
+                    {/* Kode barang di pojok kanan bawah gambar. Nama produk dan
+                        harga di overlay rata kiri, jadi sudut kanan bawah bebas
+                        dan tombol "+" di kanan atas tidak perlu digeser. */}
+                    {showSku && product.sku && (
+                        <span
+                            className="absolute bottom-4 right-4 max-w-[45%] truncate rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white backdrop-blur-sm"
+                            title={`Kode barang: ${product.sku}`}
+                        >
+                            {product.sku}
+                        </span>
+                    )}
 
                     <div className="absolute left-4 right-4 bottom-4 text-white">
                         <div className="text-lg font-bold leading-snug">{product.name}</div>

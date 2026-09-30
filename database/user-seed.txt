@@ -73,9 +73,15 @@ LAYAR KASIR (SEMUA HALAMAN):
 - Pengatur jumlah (- qty +) di baris pesanan memakai ukuran compact agar tidak
   memakan ruang di panel transaksi.
 - Kolom transaksi: Meja dan Pelanggan memakai baris label-kiri/input-kanan.
+- Daftar meja bawaan (`pos.table_numbers`) adalah "Take Away" + meja 1-20, dan
+  opsi "Tanpa meja" dihapus dari pemilih meja. Entri angka dirender "Meja N",
+  entri teks dipakai apa adanya lewat `tableLabel()` di `resources/js/utils/order.js`
+  supaya "Take Away" tidak menjadi "Meja Take Away". `table_number` di database
+  sudah menyimpan label utuh ("Meja 1"), jadi semua tampilan cukup memakainya
+  apa adanya dan tidak lagi menambah awalan "Meja" (kasir, dapur, waiter, struk).
 - Kode barang (SKU) tampil di menu produk kasir: di bawah nama pada kartu grid,
-  di bawah nama pada baris tabel, dan di pojok kanan atas gambar pada
-  tampilan hero (tombol "+" digeser ke bawah kode barang agar tidak menutupi).
+  di bawah nama pada baris tabel, dan di pojok kanan bawah gambar pada
+  tampilan hero (tombol "+" tetap di kanan atas).
   Admin mengatur lewat toggle "Kode Barang" di pengaturan kasir
   (`pos.cashier_show_sku`, default tampil). Produk tanpa SKU tidak menampilkan
   baris kosong. Kolom `products.sku` sudah ada dan form produk admin sudah
@@ -113,7 +119,7 @@ LAYAR KASIR (SEMUA HALAMAN):
 
 KOLOM AKSI TABEL PESANAN:
 - Tabel Transaksi: kolom "Pesanan" diganti "Nama Pelanggan" (menampilkan
-  "Pelanggan Umum" bila kosong, daftar menu, dan total). Nomor order dan
+  "Pelanggan Umum" bila kosong, dan total saja tanpa daftar menu). Nomor order dan
   nomor faktur disatukan jadi satu nomor saja per pesanan: nomor faktur bila
   sudah ada, jika belum (draft) memakai nomor pesanan. Kolom dirapatkan
   (padding `px-1.5`), teks sel membungkus bukan dipotong satu baris, dan

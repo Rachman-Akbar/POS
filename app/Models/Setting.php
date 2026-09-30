@@ -73,7 +73,10 @@ class Setting extends Model
     }
 
     /**
-     * The default room/table numbers available at the cashier.
+     * Meja yang tersedia di kasir.
+     *
+     * Entri bisa berupa angka polos (`1` → "Meja 1") maupun teks bebas
+     * (`Take Away`), keduanya dipakai apa adanya oleh `tableLabel()` di frontend.
      *
      * @return array<int, string>
      */
@@ -85,7 +88,7 @@ class Setting extends Model
             return array_values(array_filter(array_map('trim', explode(',', (string) $raw)), fn ($t) => $t !== ''));
         }
 
-        return array_map(fn (int $n): string => (string) $n, range(1, 20));
+        return array_merge(['Take Away'], array_map(fn (int $n): string => (string) $n, range(1, 20)));
     }
 
     /**

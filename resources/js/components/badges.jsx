@@ -5,13 +5,23 @@ export const ORDER_STATUS = {
     void: { label: 'Dibatalkan', badge: 'badge-unpaid' },
 };
 
+/**
+ * Tahap item menu: Draft → Diproses → Dimasak → Dikirim → Selesai.
+ *
+ * `cancelled` bukan tahap produksi, melainkan penanda pembatalan yang dipakai
+ * void, jadi tidak masuk urutan di atas.
+ */
 export const ITEM_STATUS = {
-    pending: { label: 'Dipesan', badge: 'badge-pending' },
+    draft: { label: 'Draft', badge: 'badge-unpaid' },
+    pending: { label: 'Diproses', badge: 'badge-pending' },
     cooking: { label: 'Dimasak', badge: 'badge-cooking' },
     sent: { label: 'Dikirim', badge: 'badge-prepared' },
     done: { label: 'Selesai', badge: 'badge-done' },
     cancelled: { label: 'Dibatalkan', badge: 'badge-unpaid' },
 };
+
+/** Urutan tahap produksi, dipakai untuk progressed/summary di papan dapur. */
+export const ITEM_STATUS_FLOW = ['draft', 'pending', 'cooking', 'sent', 'done'];
 
 export const PAYMENT_STATUS = {
     paid: { label: 'Lunas', badge: 'badge-paid' },
