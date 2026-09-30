@@ -18,6 +18,7 @@ class AdminSettingsTest extends TestCase
     {
         parent::setUp();
         $this->seed(SettingSeeder::class);
+        $this->actingAsSuperAdmin();
     }
 
     public function test_admin_can_read_default_cashier_flags(): void

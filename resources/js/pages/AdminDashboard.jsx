@@ -1,14 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Wallet, Pencil, Trash2, Plus, X, Landmark, Banknote, Settings2, Star, Package, Hash, Percent, CreditCard, QrCode,
-    Smartphone, History, Palette, Check, Tags, User,
+    Smartphone, History, Palette, Check, Tags, User, Users, ShieldCheck,
 } from 'lucide-react';
 import CategoryManager from '../components/admin/CategoryManager';
 import ProductManager from '../components/admin/ProductManager';
 import CustomerManager from '../components/admin/CustomerManager';
+import RoleManager from '../components/admin/RoleManager';
+import AdminNavDropdown from '../components/admin/AdminNavDropdown';
+import UserManager from '../components/admin/UserManager';
 import Layout from '../components/Layout';
 import { api, formatIDR } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { notifySuccess, notifyError, confirmAction } from '../utils/alerts';
 import { THEME_ACCENTS, THEME_MODES, setAppearance, useAppearance } from '../theme';
 
@@ -33,6 +37,7 @@ const EMPTY_METHOD = { code: '', type: 'kas', name: '', is_active: true };
 
 export default function AdminDashboard() {
     const queryClient = useQueryClient();
+    const { can } = useAuth();
     const [tab, setTab] = useState('settings');
     const [modal, setModal] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
@@ -41,9 +46,12 @@ export default function AdminDashboard() {
     const [mutations, setMutations] = useState(null);
     const appearance = useAppearance();
 
+    // Query di bawah memakai endpoint management yang butuh token + permission,
+    // jadi hanya dibuat bila user memang berhak agar tidak memicu 403 sia-sia.
     const { data: adminSettings } = useQuery({
         queryKey: ['admin-settings'],
         queryFn: async () => (await api.get('/admin/settings')).data,
+        enabled: can('settings.view'),
     });
 
     const flags = adminSettings?.data ?? {};
@@ -51,21 +59,25 @@ export default function AdminDashboard() {
     const { data: accounts = [] } = useQuery({
         queryKey: ['cash-bank-accounts'],
         queryFn: async () => (await api.get('/cash-bank-accounts')).data.data,
+        enabled: can('cash.view'),
     });
 
     const { data: products = [] } = useQuery({
         queryKey: ['admin-products'],
         queryFn: async () => (await api.get('/products')).data.data,
+        enabled: can('product.view', 'product.favorite'),
     });
 
     const { data: methods = [] } = useQuery({
         queryKey: ['payment-methods'],
         queryFn: async () => (await api.get('/payment-methods')).data.data,
+        enabled: can('payment_method.view'),
     });
 
     const { data: categories = [] } = useQuery({
         queryKey: ['master-categories'],
         queryFn: async () => (await api.get('/admin/categories')).data.data,
+        enabled: can('category.view'),
     });
 
     const toggleProductFavorite = useMutation({
@@ -251,29 +263,82 @@ export default function AdminDashboard() {
         }
     };
 
+    // Setiap menu punya permission; menu tanpa akses disembunyikan supaya user
+    // tidak melihat halaman yang pasti ditolak backend.
+    const navItems = [
+        { key: 'settings', label: 'Kasir', icon: Settings2, permission: 'settings.view' },
+        { key: 'appearance', label: 'Tampilan', icon: Palette, permission: 'settings.view' },
+        { key: 'categories', label: 'Kategori', icon: Tags, count: categories.length, permission: 'category.view' },
+        { key: 'products', label: 'Produk', icon: Package, count: products.length, permission: 'product.view' },
+        { key: 'favorites', label: 'Favorit', icon: Star, permission: 'product.favorite' },
+        { key: 'customers', label: 'Pelanggan', icon: User, permission: 'customer.view' },
+        { key: 'methods', label: 'Metode', icon: CreditCard, count: methods.length, permission: 'payment_method.view' },
+        { key: 'accounts', label: 'Kas & Bank', icon: Wallet, count: accounts.length, permission: 'cash.view' },
+        { key: 'roles', label: 'Hak Akses', icon: ShieldCheck, permission: 'role.view' },
+        { key: 'users', label: 'User', icon: Users, permission: 'user.view' },
+    ].filter((item) => can(item.permission));
+
+    /**
+     * Dikelompokkan menurut cara pakainya, bukan urutan alfabetis. Nama tombol
+     * dipersingkat supaya seluruh modul muat dalam satu baris di layar kasir
+     * yang sering sempit.
+     */
+    const navGroups = [
+        { key: 'catalog', label: 'Katalog', keys: ['categories', 'products', 'favorites', 'customers'] },
+        { key: 'money', label: 'Pembayaran', keys: ['methods', 'accounts'] },
+        { key: 'access', label: 'Akses', keys: ['roles', 'users'] },
+        { key: 'system', label: 'Sistem', keys: ['settings', 'appearance'] },
+    ].map((group) => ({
+        ...group,
+        items: group.keys
+            .map((key) => navItems.find((item) => item.key === key))
+            .filter(Boolean),
+    }));
+
+    // Tab aktif harus selalu milik user ini, mis. setelah role-nya berubah.
+    const activeNav = navItems.some((item) => item.key === tab) ? tab : navItems[0]?.key;
+
+    // `activeNav` sudah dideklarasikan di atas: mengacu konstanta yang
+    // dideklarasikan belakangan dari dalam callback `find` akan melempar
+    // "Cannot access before initialization" dan mematikan seluruh halaman.
+    const activeItem = navItems.find((item) => item.key === activeNav);
+
+    useEffect(() => {
+        if (activeNav && activeNav !== tab) {
+            setTab(activeNav);
+        }
+    }, [activeNav, tab]);
+
+    // Navigasi admin adalah dropdown pada baris tab: tombolnya menampilkan
+    // halaman yang sedang aktif dan membuka daftar modul yang dikelompokkan.
     const header = {
-        navLabel: 'Menu Admin',
-        navItems: [
-            { key: 'settings', label: 'Pengaturan Kasir', icon: Settings2 },
-            { key: 'appearance', label: 'Tampilan Aplikasi', icon: Palette },
-            { key: 'categories', label: 'Kategori', icon: Tags, count: categories.length },
-            { key: 'products', label: 'Produk', icon: Package, count: products.length },
-            { key: 'customers', label: 'Pelanggan', icon: User },
-            { key: 'favorites', label: 'Produk Favorit', icon: Star },
-            { key: 'methods', label: 'Metode Pembayaran', icon: CreditCard, count: methods.length },
-            { key: 'accounts', label: 'Kas & Bank', icon: Wallet, count: accounts.length },
-        ],
-        activeNav: tab,
-        onNavChange: setTab,
+        showCatalog: false,
     };
+
+    const subtitle =
+        activeItem?.count !== undefined
+            ? `${activeItem.count} data tersimpan`
+            : activeItem?.key === 'roles'
+              ? 'Atur siapa boleh melakukan apa'
+              : activeItem?.key === 'users'
+                ? 'Akun yang bisa masuk ke POS'
+                : activeItem?.key === 'appearance'
+                  ? 'Mode dan warna aplikasi'
+                  : 'Perilaku antarmuka kasir';
 
     return (
         <Layout header={header}>
-            {tab === 'settings' && (
+            <div className="border-b border-line pb-3 mb-4 flex items-center justify-between gap-3 flex-wrap bg-page">
+                <AdminNavDropdown groups={navGroups} active={activeNav} onChange={setTab} />
+                {activeItem && <p className="text-xs text-muted">{subtitle}</p>}
+            </div>
+
+            {activeNav === 'settings' && (
                 <div className="space-y-4">
                     <div className="card">
-                        <h3 className="font-bold mb-1 flex items-center gap-2"><Settings2 size={17} /> Pengaturan Tampilan Kasir</h3>
-                        <p className="text-sm text-muted mb-5">Atur elemen yang tampil dan aktif pada antarmuka kasir. Perubahan langsung berlaku.</p>
+                        <p className="text-sm text-muted mb-5">
+                            Atur elemen yang tampil dan aktif pada antarmuka kasir. Perubahan langsung berlaku.
+                        </p>
                         <div className="space-y-4">
                             {FLAG_META.map((item) => {
                                 const checked = Boolean(flags[item.key]);
@@ -295,10 +360,9 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {tab === 'appearance' && (
+            {activeNav === 'appearance' && (
                 <div className="space-y-4">
                     <div className="card">
-                        <h3 className="font-bold mb-1 flex items-center gap-2"><Palette size={17} /> Mode Tampilan</h3>
                         <p className="text-sm text-muted mb-5">
                             Pilih tampilan terang atau gelap untuk seluruh aplikasi. Mode <span className="font-semibold">Sistem</span> mengikuti pengaturan perangkat kasir.
                         </p>
@@ -324,8 +388,7 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
-                    <div className="card">
-                        <h3 className="font-bold mb-1 flex items-center gap-2"><Palette size={17} /> Warna Aksen</h3>
+                    <div className="card mt-4">
                         <p className="text-sm text-muted mb-5">Warna utama tombol, harga, dan penanda aktif pada seluruh halaman.</p>
                         <div className="flex flex-wrap gap-3">
                             {THEME_ACCENTS.map((accent) => {
@@ -354,13 +417,17 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {tab === 'categories' && <CategoryManager />}
+            {activeNav === 'categories' && <CategoryManager />}
 
-            {tab === 'products' && <ProductManager />}
+            {activeNav === 'products' && <ProductManager />}
 
-            {tab === 'customers' && <CustomerManager />}
+            {activeNav === 'customers' && <CustomerManager />}
 
-            {tab === 'favorites' && (
+            {activeNav === 'roles' && <RoleManager />}
+
+            {activeNav === 'users' && <UserManager />}
+
+            {activeNav === 'favorites' && (
                 <div className="space-y-4">
                     <div className="card">
                         <div className="mb-4">
@@ -417,7 +484,7 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {tab === 'methods' && (
+            {activeNav === 'methods' && (
                 <div className="space-y-4">
                     <div className="card">
                         <div className="flex items-center justify-between mb-4">
@@ -496,7 +563,7 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {tab === 'accounts' && (
+            {activeNav === 'accounts' && (
                 <div className="space-y-4">
                     <div className="card">
                         <div className="flex items-center justify-between mb-4">

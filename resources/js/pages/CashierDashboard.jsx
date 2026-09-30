@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Printer, ReceiptText, Check,
     Minus, Plus, ShoppingCart, UtensilsCrossed, AlertCircle,
-    Save, ChevronRight, ImageOff, ClipboardList, ChefHat,
+    Save, ChevronRight, ImageOff, ClipboardList, ChefHat, Trash2,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ProductCatalog, { ALL_CATEGORIES, catalogSectionKeys } from '../components/ProductCatalog';
@@ -12,16 +12,16 @@ import { PriceRow } from '../components/Price';
 import SearchSelect from '../components/SearchSelect';
 import CashierCustomerSelect from '../components/cashier/CashierCustomerSelect';
 import ProductLinesList, { QtyStepper, LineThumb } from '../components/cashier/ProductLinesList';
-import { PaymentDropdown, TOTAL_VALUE, TransactionCard } from '../components/cashier/PaymentParts';
-import ViewModeSwitch from '../components/ViewModeSwitch';
+import { PaymentButton, TOTAL_VALUE, TransactionCard } from '../components/cashier/PaymentParts';
 import OrderDetailPage from '../components/cashier/OrderDetailPage';
 import { ItemStatusBadge } from '../components/badges';
-import { api, formatIDR, parseNumber } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+import { api, errorMessage, formatIDR, parseNumber } from '../api/client';
 import { listenToOrders } from '../realtime/echo';
-import { notifySuccess, notifyError, Swal } from '../utils/alerts';
+import { notifySuccess, notifyError, Swal, confirmAction } from '../utils/alerts';
 import {
-    DRAFT_FILTER, isDraftOrder, isUnpaidOrder, orderProcessStatus,
-    receivedOf, remainingOf,
+    DRAFT_FILTER, isDraftOrder, isUnpaidOrder, isVoidedOrder, orderProcessStatus,
+    receivedOf, remainingOf, VOID_FILTER,
     PAYMENT_FILTER, paymentFilterOf, matchesPaymentFilter,
 } from '../utils/order';
 
@@ -53,6 +53,7 @@ const PROCESS_STAGE_OPTIONS = [
     { name: 'cooking', label: 'Dimasak' },
     { name: 'sent', label: 'Dikirim' },
     { name: 'done', label: 'Selesai' },
+    { name: VOID_FILTER, label: 'Dibatalkan' },
 ];
 
 /**
@@ -66,6 +67,13 @@ function matchesStageFilter(order, stage) {
 
 export default function CashierDashboard() {
     const queryClient = useQueryClient();
+    const { can } = useAuth();
+
+    // Koreksi transaksi hanya untuk pemegang `transaction.void` /
+    // `transaction.refund`. Tombolnya disembunyikan dari kasir, tapi tetap
+    // backend yang menolak kalau URL-nya diketik manual.
+    const canVoid = can('transaction.void');
+    const canRefund = can('transaction.refund');
 
     const [tab, setTab] = useState('kasir');
     const [mode, setMode] = useState('grid');
@@ -399,8 +407,9 @@ export default function CashierDashboard() {
 
     /**
      * Lanjutkan draft: menerbitkan invoice dan menarik stok, lalu pesanan masuk
-     * dapur. Tidak ada pembayaran di sini; pelunasan dilakukan terpisah dari
-     * order yang sudah jadi.
+     * dapur. Tidak ada pembayaran di sini — pelunasan dilakukan belakangan,
+     * setelah pelanggan selesai dan datang ke kasir (pay-later). Halaman detail
+     * otomatis berganti ke alur "Terima Pelunasan" begitu order terrefetch.
      */
     const finalizeDraft = async (order) => {
         setSettling(true);
@@ -412,6 +421,76 @@ export default function CashierDashboard() {
             queryClient.invalidateQueries({ queryKey: ['products'] });
         } catch (err) {
             notifyError('Draft gagal diproses', err.response?.data?.message ?? 'Gagal melanjutkan draft.');
+        } finally {
+            setSettling(false);
+        }
+    };
+
+    /** Hapus draft sebelum diproses: pesanan tidak akan pernah masuk dapur. */
+    const deleteDraft = async (order) => {
+        const confirmed = await confirmAction(
+            'Hapus Draft?',
+            `Draft ${order.order_number} akan dihapus. Pesanan tidak akan diproses dan tidak bisa dipulihkan.`,
+            'Ya, hapus',
+        );
+        if (!confirmed) return;
+
+        setSettling(true);
+        try {
+            await api.delete(`/orders/${order.id}`);
+            notifySuccess(`Draft ${order.order_number} dihapus.`);
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            setDetailOrderId(null);
+        } catch (err) {
+            notifyError('Hapus draft gagal', errorMessage(err, 'Gagal menghapus draft.'));
+        } finally {
+            setSettling(false);
+        }
+    };
+
+    /**
+     * Pembatalan penuh: uang yang sudah masuk dikembalikan, stok dikembalikan,
+     * dan pesanan ditutup. Dipisah dari `settle`/`finalizeDraft` karena efeknya
+     * menyentuh tiga modul sekaligus (pesanan, faktur, dan dapur).
+     */
+    const voidOrder = async (order, reason) => {
+        setSettling(true);
+        try {
+            const { data } = await api.post(`/orders/${order.id}/void`, { reason });
+
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            setDetailOrderId(null);
+
+            notifySuccess(
+                `Transaksi ${order.invoice?.invoice_number ?? order.order_number} dibatalkan.`,
+                Number(data?.data?.refunded ?? 0) > 0
+                    ? `${formatIDR(data.data.refunded)} dikembalikan ke pelanggan.`
+                    : '',
+            );
+        } catch (err) {
+            notifyError('Pembatalan gagal', errorMessage(err, 'Gagal membatalkan transaksi.'));
+        } finally {
+            setSettling(false);
+        }
+    };
+
+    /** Retur sebagian: mengembalikan uang pada satu penerimaan pembayaran. */
+    const refundOrder = async (order, receiptId, amount, reason) => {
+        setSettling(true);
+        try {
+            await api.post(`/orders/${order.id}/refunds/${receiptId}`, { amount, reason });
+
+            queryClient.invalidateQueries({ queryKey: ['cashier-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['kitchen-items'] });
+
+            notifySuccess(
+                `${formatIDR(amount)} diretur dari ${order.invoice?.invoice_number ?? order.order_number}.`,
+                reason,
+            );
+        } catch (err) {
+            notifyError('Retur gagal', errorMessage(err, 'Gagal memproses retur.'));
         } finally {
             setSettling(false);
         }
@@ -445,13 +524,37 @@ export default function CashierDashboard() {
     // kategori produk digantikan filter tahap proses.
     // Halaman detail pesanan adalah halaman penuh, bukan tab: kolom pencarian
     // dan filter disembunyikan dan navigasi tetap menyorot tab Pesanan.
-    const onOrderDetail = Boolean(detailOrderId);
-    const onOrderList = tab === 'pesanan' && !onOrderDetail;
+    // `detailOrder` bisa null ketika id yang dibuka tidak ada lagi di hasil
+    // refetch (mis. order dihapus di halaman lain). Halaman detail hanya
+    // dirender bila order-nya benar-benar ada: `OrderDetailPage` melakukan
+    // early return sebelum hooks-nya, jadi merendernya tanpa order akan
+    // melanggar Rules of Hooks dan membuat React error.
+    const onOrderDetail = Boolean(detailOrderId) && Boolean(detailOrder);
 
+    // Halaman "Cek Pesanan" hanya bermakna bila keranjang masih berisi produk.
+    // Keranjang bisa kosong dari tiga arah: produk terakhir dihapus dari halaman
+    // itu sendiri, transaksi disimpan, atau draft disimpan. Tanpa pengembalian
+    // otomatis, kasir tersangkut di panel yang tidak punya tombol kembali dan
+    // tidak bisa menambahkan produk lagi.
+    //
+    // `visibleTab` menjaga render tetap benar pada frame yang sama, sedangkan
+    // useEffect menyelaraskan state `tab` supaya tidak ada lagi yang membaca
+    // halaman Cek Pesanan yang sudah kosong.
+    const visibleTab = tab === 'cart' && cart.length === 0 ? 'kasir' : tab;
+
+    useEffect(() => {
+        if (tab !== visibleTab) {
+            setTab(visibleTab);
+            setPayOpen(false);
+        }
+    }, [tab, visibleTab]);
+
+    const onOrderList = visibleTab === 'pesanan' && !onOrderDetail;
     // Papan Dapur tidak punya katalog: pencarian produk dan filter kategori
     // tidak ada gunanya di sana, begitu juga pengalih tampilan dan buka semua.
-    const onKitchenBoard = tab === 'dapur';
+    const onKitchenBoard = visibleTab === 'dapur';
     const onCatalog = !onOrderList && !onKitchenBoard && !onOrderDetail;
+
     const stageCategories = useMemo(() => {
         const counts = new Map();
         searchMatchedOrders.forEach((order) => {
@@ -495,7 +598,7 @@ export default function CashierDashboard() {
             { key: 'pesanan', label: 'Pesanan', icon: NAV_ICONS.pesanan },
             { key: 'dapur', label: 'Dapur', icon: NAV_ICONS.dapur },
         ],
-        activeNav: onOrderDetail ? 'pesanan' : tab === 'cart' ? 'kasir' : tab,
+        activeNav: onOrderDetail ? 'pesanan' : visibleTab,
         onNavChange: (next) => {
             setDetailOrderId(null);
             setTab(next);
@@ -566,9 +669,17 @@ export default function CashierDashboard() {
             qrisId={settings?.qris_id ?? null}
             onSettle={(amount) => detailOrder && settle(detailOrder, amount)}
             onFinalize={() => detailOrder && finalizeDraft(detailOrder)}
+            onDelete={() => detailOrder && deleteDraft(detailOrder)}
             onPrint={() => detailOrder && printReceipt(detailOrder)}
             onClose={() => setDetailOrderId(null)}
             busy={settling}
+            correction={{
+                canVoid,
+                canRefund,
+                onVoid: (reason) => detailOrder && voidOrder(detailOrder, reason),
+                onRefund: (receiptId, amount, reason) =>
+                    detailOrder && refundOrder(detailOrder, receiptId, amount, reason),
+            }}
         />
     );
 
@@ -578,7 +689,7 @@ export default function CashierDashboard() {
                 detailPage
             ) : (
                 <>
-                    {tab === 'kasir' && (
+                    {visibleTab === 'kasir' && (
                         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                             <div className="xl:col-span-2">
                                 <ProductCatalog
@@ -603,7 +714,7 @@ export default function CashierDashboard() {
                         </div>
                     )}
 
-                    {tab === 'cart' && (
+                    {visibleTab === 'cart' && (
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                     <div className="xl:col-span-2">
                         <div className="card">
@@ -618,7 +729,6 @@ export default function CashierDashboard() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="badge badge-pending">{cart.length} item</span>
-                                    <ViewModeSwitch value={mode} onChange={setMode} />
                                 </div>
                             </div>
 
@@ -639,7 +749,7 @@ export default function CashierDashboard() {
                 </div>
             )}
 
-            {tab === 'pesanan' && (
+            {visibleTab === 'pesanan' && (
                 <div className="card">
                     <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4">
                         <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
@@ -794,7 +904,7 @@ export default function CashierDashboard() {
                 </div>
             )}
 
-            {tab === 'dapur' && (
+            {visibleTab === 'dapur' && (
                 <div className="card">
                     <div className="flex items-center justify-between gap-2 pb-3 mb-4">
                         <h3 className="font-bold text-sm uppercase tracking-wide flex items-center gap-2">
@@ -851,11 +961,28 @@ export default function CashierDashboard() {
 }
 
 
+/**
+ * Diskon hanya bisa diisi bila user punya `pos.discount`. Backend menolak order
+ * berdiskon untuk role lain, jadi menyembunyikan editornya mencegah kasir biasa
+ * tidak sengaja tersendat saat checkout.
+ */
 function DiscountEditor({ totals, discountType, setDiscountType, discountRaw, setDiscountRaw }) {
+    const { can } = useAuth();
     const [editing, setEditing] = useState(false);
     const percent = discountType === 'percent';
+    const allowed = can('pos.discount');
 
     const stop = () => setEditing(false);
+
+    if (!allowed) {
+        return (
+            <PriceRow
+                value={0}
+                className={TOTAL_VALUE}
+                amountClassName="font-semibold text-negative"
+            />
+        );
+    }
 
     if (!editing) {
         return (
@@ -1079,7 +1206,7 @@ function CheckoutPanel({
                             />
                         </div>
 
-                        <PaymentDropdown
+                        <PaymentButton
                             open={payOpen}
                             onToggle={onPayToggle}
                             methods={payMethods}

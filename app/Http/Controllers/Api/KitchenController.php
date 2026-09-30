@@ -59,6 +59,16 @@ class KitchenController extends Controller
             );
         }
 
+        // Pesanan yang sudah dibatalkan admin keluar dari antrean dapur. Tanpa
+        // penjaga ini, dapur masih bisa menandai "selesai" untuk barang yang
+        // tidak pernah dibayar.
+        if ($item->order?->isVoided()) {
+            return response()->json(
+                ['message' => 'Pesanan ini sudah dibatalkan, tidak bisa diproses dapur.'],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
         $previous = $item->status;
         $item->update(['status' => $data['status']]);
 

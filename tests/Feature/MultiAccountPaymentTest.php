@@ -28,7 +28,7 @@ class MultiAccountPaymentTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->cashier = User::factory()->create(['role' => 'cashier']);
+        $this->cashier = $this->staff($this->cashierPermissions(), ['role' => 'cashier']);
         $this->product = Product::firstOrFail();
     }
 
@@ -133,7 +133,7 @@ class MultiAccountPaymentTest extends TestCase
     {
         [$accountA, $accountB] = $this->createBankAccounts('bca', ['Rekening A', 'Rekening B']);
 
-        $waiter = User::factory()->create(['role' => 'waiter']);
+        $waiter = $this->staff($this->waiterPermissions(), ['role' => 'waiter']);
         $this->actingAs($waiter)->postJson('/api/orders', [
             'payment_type' => 'pay_later',
             'items' => [['product_id' => $this->product->id, 'qty' => 1]],
@@ -155,7 +155,7 @@ class MultiAccountPaymentTest extends TestCase
         $this->createBankAccounts('bca', ['Rekening A', 'Rekening B']);
         [$bniAccount] = $this->createBankAccounts('bni', ['Rekening BNI']);
 
-        $waiter = User::factory()->create(['role' => 'waiter']);
+        $waiter = $this->staff($this->waiterPermissions(), ['role' => 'waiter']);
         $this->actingAs($waiter)->postJson('/api/orders', [
             'payment_type' => 'pay_later',
             'items' => [['product_id' => $this->product->id, 'qty' => 1]],

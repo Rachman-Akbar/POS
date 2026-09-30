@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Product;
+use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -12,6 +13,8 @@ use Illuminate\Validation\Rule;
 
 class AdminProductController extends Controller
 {
+    public function __construct(private readonly AuditLogger $audit) {}
+
     /**
      * Master produk: semua produk (aktif maupun nonaktif) dengan pencarian.
      */
@@ -53,13 +56,27 @@ class AdminProductController extends Controller
         $product = Product::create($this->validated($request));
         Category::register($product->category);
 
+        $this->audit->log($request, 'create', 'product', $product, "Menambah produk {$product->name}.");
+
         return response()->json(['data' => $product], Response::HTTP_CREATED);
     }
 
     public function update(Request $request, Product $product): JsonResponse
     {
+        $old = $product->only(['name', 'sku', 'price', 'stock', 'is_active', 'category']);
+
         $product->update($this->validated($request, $product));
         Category::register($product->category);
+
+        $this->audit->log(
+            $request,
+            'update',
+            'product',
+            $product,
+            "Memperbarui produk {$product->name}.",
+            $old,
+            $product->only(['name', 'sku', 'price', 'stock', 'is_active', 'category']),
+        );
 
         return response()->json(['data' => $product->fresh()]);
     }
@@ -67,7 +84,7 @@ class AdminProductController extends Controller
     /**
      * Produk yang sudah pernah masuk transaksi tidak boleh dihapus.
      */
-    public function destroy(Product $product): Response|JsonResponse
+    public function destroy(Request $request, Product $product): Response|JsonResponse
     {
         if ($product->orderItems()->exists()) {
             return response()->json([
@@ -75,7 +92,10 @@ class AdminProductController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $name = $product->name;
         $product->delete();
+
+        $this->audit->log($request, 'delete', 'product', null, "Menghapus produk {$name}.");
 
         return response()->noContent();
     }

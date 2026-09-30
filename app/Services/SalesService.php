@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\ItemStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\PaymentType;
@@ -178,6 +179,28 @@ class SalesService
     }
 
     /**
+     * Hapus draft sepenuhnya.
+     *
+     * Draft tidak membentuk invoice, tidak mempunyai jurnal, dan tidak menarik
+     * stok, jadi penghapusannya cukup menghapus item dan row order — tidak ada
+     * efek berantai yang harus dibatalkan. Order yang bukan draft menolak
+     * operasi ini supaya transaksi yang sudah diproses tidak bisa hilang.
+     */
+    public function deleteDraft(Order $order): void
+    {
+        DB::transaction(function () use ($order): void {
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== OrderStatus::Draft->value) {
+                throw new \DomainException('Pesanan ini bukan draft.');
+            }
+
+            $locked->items()->delete();
+            $locked->delete();
+        });
+    }
+
+    /**
      * Create the order item rows and return [subtotal, cogs]. When
      * $reserveStock is false (drafts) stock is not decremented and a short
      * stock is tolerated until the draft is finalized.
@@ -245,6 +268,13 @@ class SalesService
      */
     public function settlePayment(Order $order, PaymentMethod $method, ?float $amount = null, ?int $paymentAccountId = null): array
     {
+        // Pembatalan menutup invoice untuk selamanya. Tanpa penjaga ini kasir
+        // bisa menerima pembayaran untuk transaksi yang sudah dibatalkan admin,
+        // dan uang itu hilang tanpa pernah masuk pembukuan.
+        if ($order->isVoided() || $order->invoice?->isVoided()) {
+            throw new \DomainException('Transaksi ini sudah dibatalkan.');
+        }
+
         if ($order->payment_status === PaymentStatus::Paid->value) {
             throw new \DomainException('Order ini sudah lunas.');
         }
@@ -262,7 +292,6 @@ class SalesService
             if ($remaining <= 0) {
                 throw new \DomainException('Faktur ini sudah lunas.');
             }
-
             $tendered = $amount === null ? $remaining : round(max((float) $amount, 0), 2);
             $payAmount = round(min($tendered, $remaining), 2);
 
@@ -297,10 +326,200 @@ class SalesService
     public function completeOrder(Order $order): Order
     {
         return DB::transaction(function () use ($order) {
+            if ($order->isVoided()) {
+                throw new \DomainException('Pesanan ini sudah dibatalkan.');
+            }
+
             $order->update(['status' => OrderStatus::Completed->value]);
 
             return $order->fresh('items.product');
         });
+    }
+
+    /**
+     * Batalkan satu transaksi: kembalikan stok, batalkan faktur, kembalikan
+     * seluruh pembayaran yang sudah masuk, dan reversal jurnal pembukuan.
+     *
+     * Void dipakai untuk pembatalan total. Retur sebagian tetap lewat
+     * {@see self::refundPayment()} supaya tidak ada dua cara untuk mengembalikan
+     * uang dan penjualan yang dibatalkan tidak/dobel ter-refund.
+     *
+     * @return array{order: Order, refunded: float}
+     */
+    public function voidOrder(Order $order, ?User $actor, string $reason): array
+    {
+        return DB::transaction(function () use ($order, $actor, $reason) {
+            // Baris pesanan dikunci supaya void dan pembayaran tidak bisa
+            // berjalan bersamaan atas invoice yang sama.
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->isVoided()) {
+                throw new \DomainException('Pesanan ini sudah dibatalkan.');
+            }
+
+            $invoice = $locked->invoice()->first();
+            $refunded = 0.0;
+
+            // Uang yang sudah masuk wajib kembali, karena void berarti penjualan
+            // ini tidak pernah terjadi. Faktur yang belum dibayar tidak perlu
+            // disentuh: tidak ada uang yang perlu dikembalikan.
+            if ($invoice) {
+                $receipts = $invoice->receipts()->lockForUpdate()->get();
+
+                foreach ($receipts as $receipt) {
+                    $refunded += $receipt->refundableAmount();
+                }
+
+                // Satu entri pembatalan untuk seluruh efeknya: pendapatan, HPP,
+                // persediaan, PPN, dan uang yang keluar. Kred piutang hanya untuk
+                // bagian faktur yang belum dibayar, karena bagian yang sudah
+                // masuk kas harus keluar lewat akun kas, bukan lewat piutang.
+                $this->accountingService->postSalesInvoiceReversal(
+                    $invoice,
+                    $receipts,
+                    (float) $invoice->cogs_total,
+                    $reason
+                );
+
+                foreach ($receipts as $receipt) {
+                    $refundable = $receipt->refundableAmount();
+
+                    if ($refundable > 0) {
+                        $this->markRefunded($receipt, $refundable, $actor, $reason);
+                    }
+                }
+
+                $invoice->update(['status' => InvoiceStatus::Void->value]);
+            }
+
+            // Draft tidak pernah menahan stok, jadi hanya pesanan yang sudah
+            // terbit faktur yang perlu mengembalikan stok.
+            if ($invoice) {
+                foreach ($locked->items as $item) {
+                    Product::whereKey($item->product_id)->increment('stock', (int) $item->qty);
+                }
+            }
+
+            $locked->update([
+                'status' => OrderStatus::Void->value,
+                'payment_status' => PaymentStatus::Refunded->value,
+                'paid_amount' => 0,
+                'voided_by' => $actor?->id,
+                'voided_at' => now(),
+                'void_reason' => $reason,
+            ]);
+
+            foreach ($locked->items as $item) {
+                $item->update(['status' => ItemStatus::Cancelled->value]);
+            }
+
+            return [
+                'order' => $locked->fresh(['items.product', 'invoice.receipts', 'customer']),
+                'refunded' => round($refunded, 2),
+            ];
+        });
+    }
+
+    /**
+     * Kembalikan sebagian atau seluruh pembayaran ke pelanggan.
+     *
+     * Nominal retur tidak boleh melebihi sisa pembayaran yang belum diretur,
+     * jadi kas tidak mungkin keluar lebih besar dari yang pernah masuk.
+     *
+     * @return array{order: Order, receipt: SalesReceipt, amount: float, reason: string}
+     */
+    public function refundPayment(Order $order, SalesReceipt $receipt, ?float $amount, ?User $actor, string $reason): array
+    {
+        return DB::transaction(function () use ($order, $receipt, $amount, $actor, $reason) {
+            $locked = Order::whereKey($order->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->isVoided()) {
+                throw new \DomainException('Pesanan ini sudah dibatalkan, tidak bisa diretur.');
+            }
+
+            $invoice = $locked->invoice ?? throw new \DomainException('Faktur belum tersedia.');
+            $lockedReceipt = $invoice->receipts()->lockForUpdate()->find($receipt->getKey())
+                ?? throw new \DomainException('Penerimaan pembayaran tidak ditemukan pada pesanan ini.');
+
+            $refundable = $lockedReceipt->refundableAmount();
+
+            if ($refundable <= 0) {
+                throw new \DomainException('Penerimaan ini sudah diretur seluruhnya.');
+            }
+
+            $value = round($amount === null ? $refundable : max((float) $amount, 0), 2);
+
+            if ($value <= 0) {
+                throw new \DomainException('Nominal retur harus lebih dari nol.');
+            }
+
+            if ($value > $refundable + 0.009) {
+                throw new \DomainException('Nominal retur melebihi sisa pembayaran yang bisa diretur.');
+            }
+
+            $this->applyRefund($lockedReceipt, $value, $actor, $reason);
+
+            // `gross` tidak pernah berubah karena retur; yang berkurang adalah
+            // `refund_amount`. Kas yang benar-benar ditahan kasir =
+            // gross - refund, sedangkan yang belum pernah dibayar =
+            // total - gross. Status pembayaran diturunkan dari dua angka itu,
+            // bukan dari `paid_amount` saja, supaya transaksi yang sudah
+            // diretur penuh tidak salah tampil sebagai "Lunas".
+            $received = round((float) $invoice->receipts()->sum('gross_amount'), 2);
+            $refunded = round((float) $invoice->receipts()->sum('refund_amount'), 2);
+            $retained = round($received - $refunded, 2);
+            $total = (float) $invoice->total_amount;
+
+            $locked->update([
+                'paid_amount' => $retained,
+                'payment_status' => match (true) {
+                    $refunded > 0 && $retained <= 0 => PaymentStatus::Refunded->value,
+                    $received + 0.009 >= $total && $retained + 0.009 >= $total => PaymentStatus::Paid->value,
+                    $retained > 0 => PaymentStatus::Partial->value,
+                    default => PaymentStatus::Unpaid->value,
+                },
+            ]);
+
+            if ($received + 0.009 < $total) {
+                $invoice->update(['status' => InvoiceStatus::Issued->value]);
+            }
+
+            return [
+                'order' => $locked->fresh(['items.product', 'invoice.receipts', 'customer']),
+                'receipt' => $lockedReceipt->fresh(),
+                'amount' => $value,
+                'reason' => $reason,
+            ];
+        });
+    }
+
+    /**
+     * Catat retur pada satu penerimaan dan posting jurnal pembalik.
+     *
+     * Nilai retur Discharge dihitung dari jumlah yang sudah diretur sebelumnya,
+     * jadi retur bertahap pada satu penerimaan tidak menimpa nilai sebelumnya.
+     */
+    private function applyRefund(SalesReceipt $receipt, float $amount, ?User $actor, string $reason): void
+    {
+        $this->accountingService->postSalesRefund($receipt, $amount, $reason);
+
+        $this->markRefunded($receipt, $amount, $actor, $reason);
+    }
+
+    /**
+     * Tandai uang pada satu penerimaan sebagai sudah kembali ke pelanggan.
+     *
+     * Dipisah dari posting jurnal karena pembatalan menandai seluruh penerimaan
+     * sekaligus lewat satu entri pembatalan, bukan satu jurnal per penerimaan.
+     */
+    private function markRefunded(SalesReceipt $receipt, float $amount, ?User $actor, string $reason): void
+    {
+        $receipt->forceFill([
+            'refund_amount' => round((float) $receipt->refund_amount + $amount, 2),
+            'refunded_by' => $actor?->id,
+            'refunded_at' => now(),
+            'refund_reason' => $reason,
+        ])->save();
     }
 
     /**
@@ -312,6 +531,7 @@ class SalesService
             'order_id' => $order->id,
             'invoice_number' => 'INV-'.now()->format('Ymd').'-'.$order->id,
             'total_amount' => $order->total_amount,
+            'cogs_total' => $cogs,
             'status' => InvoiceStatus::Issued->value,
             'issued_at' => now(),
         ]);

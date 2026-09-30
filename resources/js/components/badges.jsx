@@ -1,6 +1,8 @@
 export const ORDER_STATUS = {
+    draft: { label: 'Draft', badge: 'badge-pending' },
     pending: { label: 'Menunggu', badge: 'badge-pending' },
     completed: { label: 'Selesai', badge: 'badge-completed' },
+    void: { label: 'Dibatalkan', badge: 'badge-unpaid' },
 };
 
 export const ITEM_STATUS = {
@@ -8,12 +10,14 @@ export const ITEM_STATUS = {
     cooking: { label: 'Dimasak', badge: 'badge-cooking' },
     sent: { label: 'Dikirim', badge: 'badge-prepared' },
     done: { label: 'Selesai', badge: 'badge-done' },
+    cancelled: { label: 'Dibatalkan', badge: 'badge-unpaid' },
 };
 
 export const PAYMENT_STATUS = {
     paid: { label: 'Lunas', badge: 'badge-paid' },
     partial: { label: 'Bayar Sebagian', badge: 'badge-cooking' },
     unpaid: { label: 'Belum Bayar', badge: 'badge-unpaid' },
+    refunded: { label: 'Diretur', badge: 'badge-unpaid' },
 };
 
 export const PAYMENT_TYPE = {

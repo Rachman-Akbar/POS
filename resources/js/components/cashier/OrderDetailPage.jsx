@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Building2, ChevronLeft, Printer, ReceiptText, ShoppingCart, User, UtensilsCrossed } from 'lucide-react';
+import { Building2, ChevronLeft, Printer, ReceiptText, ShoppingCart, Trash2, User, UtensilsCrossed } from 'lucide-react';
 import { formatIDR } from '../../api/client';
 import { isDraftOrder, isUnpaidOrder, receivedOf, remainingOf } from '../../utils/order';
 import Price, { PriceRow } from '../Price';
 import ProductLinesList, { LineThumb } from './ProductLinesList';
-import { PaymentDropdown, TOTAL_VALUE, TransactionCard } from './PaymentParts';
+import TransactionCorrection from './TransactionCorrection';
+import { PaymentButton, TOTAL_VALUE, TransactionCard } from './PaymentParts';
 import ViewModeSwitch from '../ViewModeSwitch';
 
 /**
@@ -35,22 +36,22 @@ export default function OrderDetailPage({
     qrisId = null,
     onSettle,
     onFinalize,
+    onDelete = null,
     onPrint,
     onClose,
     busy = false,
+    correction = null,
 }) {
-    if (!order) return null;
-
-    // Dropdown pembayaran tertutup sejak awal supaya panel Transaksi tetap
-    // ringkas; kasir membukanya lewat tombol "Bayar" bila perlu mengisi
-    // nominal atau mengganti metode.
+    // Form pembayaran tertutup sejak awal supaya panel Transaksi tetap ringkas.
+    // Kasir membukanya lewat tombol "Bayar" dan menutupnya dengan tombol yang
+    // sama, jadi tidak ada kontrol kedua yang harus dicari.
     const [payOpen, setPayOpen] = useState(false);
     // Nominal pelunasan yang diinput kasir. Kosong berarti pakai sisa tagihan.
     const [settleRaw, setSettleRaw] = useState('');
 
     const draft = isDraftOrder(order);
     const received = receivedOf(order);
-    const total = Number(order.total_amount);
+    const total = Number(order?.total_amount ?? 0);
     const remaining = remainingOf(order);
     const unpaid = isUnpaidOrder(order);
 
@@ -63,7 +64,13 @@ export default function OrderDetailPage({
     // tagihannya berubah, misalnya setelah pelunasan diterima.
     useEffect(() => {
         setSettleRaw('');
-    }, [order.id, remaining]);
+    }, [order?.id, remaining]);
+
+    // Hooks harus dijalankan tanpa syarat: return di bawah baru dilakukan
+    // setelah semua hook selesai, kalau tidak React akan menghitung jumlah hook
+    // berbeda antar render dan melempar error.
+    if (!order) return null;
+
     const customer = order.customer ?? null;
     const customerLabel = customer ? customer.company_name || customer.name : 'Pelanggan Umum';
     const createdAt = order.created_at
@@ -87,11 +94,18 @@ export default function OrderDetailPage({
         product: item.product ?? null,
     }));
 
-    const status = draft
-        ? { text: 'Draft', cls: 'badge-unpaid' }
-        : remaining > 0
-          ? { text: 'Belum Lunas', cls: 'badge-unpaid' }
-          : { text: 'Lunas', cls: 'badge-paid' };
+    const voided = order.status === 'void';
+    const refunded = order.payment_status === 'refunded';
+
+    const status = voided
+        ? { text: 'Dibatalkan', cls: 'badge-unpaid' }
+        : draft
+          ? { text: 'Draft', cls: 'badge-unpaid' }
+          : refunded
+            ? { text: 'Diretur', cls: 'badge-unpaid' }
+            : remaining > 0
+              ? { text: 'Belum Lunas', cls: 'badge-unpaid' }
+              : { text: 'Lunas', cls: 'badge-paid' };
 
     return (
         <div>
@@ -213,7 +227,7 @@ export default function OrderDetailPage({
                             />
                         </div>
 
-                        <PaymentDropdown
+                        <PaymentButton
                             open={payOpen}
                             onToggle={() => setPayOpen((open) => !open)}
                             methods={draft ? [] : payMethods}
@@ -243,14 +257,26 @@ export default function OrderDetailPage({
                         />
 
                         {draft ? (
-                            <button
-                                onClick={onFinalize}
-                                disabled={busy}
-                                title="Terbitkan faktur dan kirim ke dapur tanpa pembayaran"
-                                className="btn btn-primary w-full justify-center mt-3"
-                            >
-                                {busy ? 'Memproses...' : 'Lanjutkan Draft'}
-                            </button>
+                            <div className="flex items-center gap-2 mt-3">
+                                <button
+                                    onClick={onFinalize}
+                                    disabled={busy}
+                                    title="Terbitkan faktur dan kirim ke dapur tanpa pembayaran — pelunasan dilakukan belakangan (pay-later)"
+                                    className="btn btn-primary flex-1 justify-center"
+                                >
+                                    {busy ? 'Memproses...' : <><ShoppingCart size={15} /> Lanjutkan Draft</>}
+                                </button>
+                                {onDelete && (
+                                    <button
+                                        onClick={onDelete}
+                                        disabled={busy}
+                                        title="Hapus draft ini — pesanan tidak akan pernah diproses"
+                                        className="btn btn-ghost !px-3 justify-center"
+                                    >
+                                        <Trash2 size={15} />
+                                    </button>
+                                )}
+                            </div>
                         ) : unpaid ? (
                             <button
                                 onClick={() => onSettle(settleAmount)}
@@ -261,6 +287,15 @@ export default function OrderDetailPage({
                                 {busy ? 'Memproses...' : 'Terima Pelunasan'}
                             </button>
                         ) : null}
+
+                        <TransactionCorrection
+                            order={order}
+                            canVoid={correction?.canVoid ?? false}
+                            canRefund={correction?.canRefund ?? false}
+                            onVoid={correction?.onVoid}
+                            onRefund={correction?.onRefund}
+                            busy={busy}
+                        />
                     </div>
                 </TransactionCard>
             </div>

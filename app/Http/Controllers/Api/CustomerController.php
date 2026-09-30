@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\CustomerType;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -17,6 +18,8 @@ class CustomerController extends Controller
      * Field yang hanya relevan untuk badan usaha.
      */
     private const BUSINESS_FIELDS = ['company_name', 'nik', 'npwp', 'province', 'city', 'postal_code', 'country'];
+
+    public function __construct(private readonly AuditLogger $audit) {}
 
     /**
      * Master pelanggan: perorangan maupun badan usaha.
@@ -106,7 +109,7 @@ class CustomerController extends Controller
     /**
      * Pelanggan yang sudah punya transaksi tidak boleh dihapus.
      */
-    public function destroy(Customer $customer): Response|JsonResponse
+    public function destroy(Request $request, Customer $customer): Response|JsonResponse
     {
         if ($customer->orders()->exists()) {
             return response()->json([
@@ -114,7 +117,10 @@ class CustomerController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $name = $customer->name;
         $customer->delete();
+
+        $this->audit->log($request, 'delete', 'customer', null, "Menghapus pelanggan {$name}.");
 
         return response()->noContent();
     }

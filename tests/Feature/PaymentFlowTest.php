@@ -30,13 +30,13 @@ class PaymentFlowTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->cashier = User::factory()->create(['role' => 'cashier']);
+        $this->cashier = $this->staff($this->cashierPermissions(), ['role' => 'cashier']);
         $this->product = Product::firstOrFail();
     }
 
     private function createPayLaterOrder(): Order
     {
-        $waiter = User::factory()->create(['role' => 'waiter']);
+        $waiter = $this->staff($this->waiterPermissions(), ['role' => 'waiter']);
 
         $this->actingAs($waiter)->postJson('/api/orders', [
             'payment_type' => 'pay_later',
@@ -44,6 +44,20 @@ class PaymentFlowTest extends TestCase
         ]);
 
         return Order::firstOrFail();
+    }
+
+    /**
+     * Pesanan yang dibuat user tertentu, dipakai untuk menguji data scope:
+     * transaksi harus bisa dibedakan berdasarkan siapa yang membayarnya.
+     */
+    private function createPayLaterOrderAs(User $actor): Order
+    {
+        $this->actingAs($actor)->postJson('/api/orders', [
+            'payment_type' => 'pay_later',
+            'items' => [['product_id' => $this->product->id, 'qty' => 1]],
+        ])->assertCreated();
+
+        return Order::latest('id')->firstOrFail();
     }
 
     public function test_cashier_sees_pending_invoices(): void
@@ -56,25 +70,56 @@ class PaymentFlowTest extends TestCase
     }
 
     /**
-     * Tabel "Pesanan" menampilkan seluruh transaksi, bukan hanya faktur
-     * gantung: yang sudah lunas tetap ikut agar terlihat riwayatnya.
+     * Tabel "Pesanan" menampilkan transaksi yang belum lunas milik siapa pun —
+     * itu memang tugas kasir di kasir yang sama — ditambah transaksi lunas
+     * miliknya sendiri. Lunas milik kasir lain disembunyikan oleh data scope,
+     * karena angka penjualan shift orang lain bukan haknya.
      */
-    public function test_cashier_sees_every_invoice_not_only_unpaid_ones(): void
+    public function test_cashier_sees_unpaid_invoices_of_others_and_own_settled_ones(): void
     {
-        $this->createPayLaterOrder();
-        $unsettled = $this->createPayLaterOrder();
+        $waiterOrder = $this->createPayLaterOrder();
+        $ownOrder = $this->createPayLaterOrderAs($this->cashier);
 
-        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$unsettled->id}/settle", [
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$ownOrder->id}/settle", [
             'payment_method' => 'qris',
         ])->assertOk();
 
-        $this->actingAs($this->cashier)->getJson('/api/payments/invoices')
+        $invoices = $this->actingAs($this->cashier)->getJson('/api/payments/invoices')
             ->assertOk()
-            ->assertJsonCount(2, 'data');
+            ->json('data');
+
+        $this->assertCount(2, $invoices);
+        $this->assertEqualsCanonicalizing(
+            [$waiterOrder->invoice->invoice_number, $ownOrder->invoice->invoice_number],
+            array_column($invoices, 'invoice_number'),
+        );
 
         $this->actingAs($this->cashier)->getJson('/api/payments/pending')
             ->assertOk()
             ->assertJsonCount(1, 'data');
+    }
+
+    /**
+     * `transaction.view.all` dipisah dari `transaction.view`: user yang
+     * memegangnya melihat seluruh shift, kasir biasa tidak.
+     */
+    public function test_user_with_transaction_view_all_sees_other_shifts_settlements(): void
+    {
+        $this->createPayLaterOrder();
+        $ownOrder = $this->createPayLaterOrderAs($this->cashier);
+
+        $this->actingAs($this->cashier)->postJson("/api/payments/orders/{$ownOrder->id}/settle", [
+            'payment_method' => 'qris',
+        ])->assertOk();
+
+        $supervisor = $this->staff(
+            [...$this->cashierPermissions(), 'transaction.view.all'],
+            ['role' => 'admin']
+        );
+
+        $this->actingAs($supervisor)->getJson('/api/payments/invoices')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
     }
 
     public function test_invoice_list_carries_amounts_and_process_state_for_the_table(): void

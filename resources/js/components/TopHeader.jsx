@@ -1,24 +1,33 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-    Search, CheckCircle2, ChevronDown, ChefHat, Receipt, ShieldCheck, UtensilsCrossed, Eye, EyeOff,
+    Search, CheckCircle2, ChevronDown, ChefHat, LogIn, LogOut, Receipt, ShieldCheck, UtensilsCrossed, Eye, EyeOff,
 } from 'lucide-react';
 import ViewModeSwitch from './ViewModeSwitch';
 import CategoryFilter from './CategoryFilter';
 import ThemePicker from './ThemePicker';
 import { useClickOutside } from '../hooks/useClickOutside';
+import { useAuth } from '../auth/AuthContext';
+import {
+    ADMIN_PERMISSIONS,
+    CASHIER_PERMISSIONS,
+    KITCHEN_PERMISSIONS,
+    WAITER_PERMISSIONS,
+} from '../auth/permissions';
 
 export { VIEW_MODES } from './ViewModeSwitch';
 
-export const ROLES = [
-    { path: '/kasir', label: 'Kasir', icon: Receipt, user: { name: 'Fajar', jabatan: 'Kasir' } },
-    { path: '/admin', label: 'Admin', icon: ShieldCheck, user: { name: 'Raka', jabatan: 'Administrator' } },
-    { path: '/koki', label: 'Koki', icon: ChefHat, user: { name: 'Dimas', jabatan: 'Koki Dapur' } },
-    { path: '/waiters', label: 'Waiters', icon: UtensilsCrossed, user: { name: 'Sari', jabatan: 'Pelayan' } },
+// Halaman yang bisa dibuka. Kasir, dapur, dan pelayan tetap publik; admin
+// hanya ditampilkan bila user yang sedang login memang berhak.
+export const APP_PAGES = [
+    { path: '/kasir', label: 'Kasir', icon: Receipt, permissions: CASHIER_PERMISSIONS },
+    { path: '/koki', label: 'Dapur', icon: ChefHat, permissions: KITCHEN_PERMISSIONS },
+    { path: '/waiters', label: 'Pelayan', icon: UtensilsCrossed, permissions: WAITER_PERMISSIONS },
+    { path: '/admin', label: 'Admin', icon: ShieldCheck, permissions: ADMIN_PERMISSIONS },
 ];
 
-function currentRole(pathname) {
-    return ROLES.find((r) => pathname.startsWith(r.path)) ?? ROLES[0];
+function currentPage(pathname) {
+    return APP_PAGES.find((item) => pathname.startsWith(item.path)) ?? APP_PAGES[0];
 }
 
 export default function TopHeader({
@@ -45,14 +54,22 @@ export default function TopHeader({
 }) {
     const navigate = useNavigate();
     const { pathname } = useLocation();
+    const { user, isAuthenticated, logout, canAny } = useAuth();
     const [navOpen, setNavOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const navRef = useClickOutside(() => setNavOpen(false));
     const profileRef = useClickOutside(() => setProfileOpen(false));
-    const role = currentRole(pathname);
+    const page = currentPage(pathname);
     const dropdownLabel = navItems.find((item) => item.key === activeNav)?.label ?? navLabel;
 
-    const goRole = (path) => {
+    const pages = APP_PAGES.filter((item) => !item.permissions || canAny(...item.permissions));
+    const displayName = user?.name ?? 'Tamu';
+    const roleLabel = user
+        ? user.roles?.map((role) => role.name).join(', ') || 'Tanpa role'
+        : 'Belum masuk';
+    const initials = (user?.name ?? '?').slice(0, 1);
+
+    const goPage = (path) => {
         setProfileOpen(false);
         navigate(path);
     };
@@ -142,46 +159,78 @@ export default function TopHeader({
                     <button
                         onClick={() => setProfileOpen((v) => !v)}
                         className="flex items-center gap-2 py-1.5 pl-1.5 pr-2 rounded-lg hover:bg-surface-2 transition-colors"
-                        title="Akun & ganti peran (simulasi)"
+                        title={isAuthenticated ? user.email : 'Menu halaman & masuk'}
                     >
                         <span className="hidden md:block text-left leading-tight">
-                            <span className="block text-sm font-semibold">{role.user.name}</span>
-                            <span className="block text-[10px] text-muted">{role.user.jabatan}</span>
+                            <span className="block text-sm font-semibold">{displayName}</span>
+                            <span className="block text-[10px] text-muted truncate max-w-[140px]">{roleLabel}</span>
                         </span>
                         <span className="w-8 h-8 rounded-full bg-content text-surface text-xs font-bold flex items-center justify-center uppercase">
-                            {role.user.name[0]}
+                            {initials}
                         </span>
                         <ChevronDown size={14} className={`text-muted transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {profileOpen && (
-                        <div className="absolute right-0 top-12 w-56 bg-surface rounded-lg py-1.5 shadow-xl">
-                            <div className="flex items-center gap-3 px-3 py-2 mb-1.5">
-                                <span className="w-9 h-9 rounded-full bg-accent-soft text-accent-ink text-xs font-bold flex items-center justify-center uppercase shrink-0">
-                                    {role.user.name[0]}
-                                </span>
-                                <div className="min-w-0">
-                                    <div className="text-sm font-bold truncate">{role.user.name}</div>
-                                    <div className="text-[11px] text-muted truncate">{role.user.jabatan}</div>
+                        <div className="absolute right-0 top-12 w-60 bg-surface rounded-lg py-1.5 shadow-xl">
+                            {isAuthenticated ? (
+                                <div className="flex items-center gap-3 px-3 py-2 mb-1.5">
+                                    <span className="w-9 h-9 rounded-full bg-accent-soft text-accent-ink text-xs font-bold flex items-center justify-center uppercase shrink-0">
+                                        {initials}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-bold truncate">{user.name}</div>
+                                        <div className="text-[11px] text-muted truncate">{user.email}</div>
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="px-3 py-2 mb-1.5">
+                                    <div className="text-sm font-bold">Belum masuk</div>
+                                    <div className="text-[11px] text-muted">
+                                        Halaman kasir, dapur, dan pelayan tetap bisa dipakai.
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="px-3 py-1 text-[11px] font-semibold text-muted uppercase tracking-wide">
-                                Switch Role (Simulasi)
+                                Pindah Halaman
                             </div>
-                            {ROLES.map((r) => (
+                            {pages.map((item) => (
                                 <button
-                                    key={r.path}
-                                    onClick={() => goRole(r.path)}
+                                    key={item.path}
+                                    onClick={() => goPage(item.path)}
                                     className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors cursor-pointer ${
-                                        role.path === r.path ? 'bg-accent-soft text-accent-ink font-semibold' : 'hover:bg-surface-2'
+                                        page.path === item.path ? 'bg-accent-soft text-accent-ink font-semibold' : 'hover:bg-surface-2'
                                     }`}
                                 >
-                                    <r.icon size={15} />
-                                    {r.label}
-                                    {role.path === r.path && <CheckCircle2 size={14} className="ml-auto text-accent" />}
+                                    <item.icon size={15} />
+                                    {item.label}
+                                    {page.path === item.path && <CheckCircle2 size={14} className="ml-auto text-accent" />}
                                 </button>
                             ))}
+
+                            <div className="my-1.5 border-t border-line" />
+
+                            {isAuthenticated ? (
+                                <button
+                                    onClick={() => {
+                                        setProfileOpen(false);
+                                        logout();
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors cursor-pointer hover:bg-surface-2"
+                                >
+                                    <LogOut size={15} />
+                                    Keluar
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => goPage('/login')}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors cursor-pointer hover:bg-surface-2"
+                                >
+                                    <LogIn size={15} />
+                                    Masuk
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>

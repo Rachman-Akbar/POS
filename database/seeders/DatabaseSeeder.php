@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -16,6 +15,11 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            PermissionSeeder::class,
+            RoleSeeder::class,
+        ]);
+
+        $this->call([
             ChartOfAccountSeeder::class,
             PaymentMethodSeeder::class,
             CashBankAccountSeeder::class,
@@ -28,7 +32,7 @@ class DatabaseSeeder extends Seeder
         $this->call(SalesTransactionSeeder::class);
 
         $this->generateProductImages();
-        $this->seedUsers();
+        $this->call(UserSeeder::class);
     }
 
     /**
@@ -40,27 +44,5 @@ class DatabaseSeeder extends Seeder
     private function generateProductImages(): void
     {
         $this->command?->call('products:images', ['--prune' => true]);
-    }
-
-    /**
-     * AkunStaff awal. Password default: `password`.
-     */
-    private function seedUsers(): void
-    {
-        $password = 'password';
-
-        foreach ([
-            ['name' => 'Ahmad Fauzi', 'email' => 'ahmad.fauzi@warungnusantara.id', 'role' => 'admin'],
-            ['name' => 'Siti Rahayu', 'email' => 'siti.rahayu@warungnusantara.id', 'role' => 'cashier'],
-            ['name' => 'Budi Santoso', 'email' => 'budi.santoso@warungnusantara.id', 'role' => 'cashier'],
-            ['name' => 'Rina Wulandari', 'email' => 'rina.wulandari@warungnusantara.id', 'role' => 'waiter'],
-            ['name' => 'Agus Prasetyo', 'email' => 'agus.prasetyo@warungnusantara.id', 'role' => 'kitchen'],
-            ['name' => 'Dewi Lestari', 'email' => 'dewi.lestari@warungnusantara.id', 'role' => 'kitchen'],
-        ] as $user) {
-            User::query()->updateOrCreate(
-                ['email' => $user['email']],
-                ['name' => $user['name'], 'role' => $user['role'], 'password' => $password]
-            );
-        }
     }
 }

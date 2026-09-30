@@ -28,7 +28,7 @@ class CashierCustomerTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->cashier = User::factory()->create(['role' => 'cashier']);
+        $this->cashier = $this->staff($this->cashierPermissions(), ['role' => 'cashier']);
         $this->product = Product::firstOrFail();
     }
 

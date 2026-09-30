@@ -9,6 +9,9 @@
 /** Kunci filter untuk pesanan yang masih berstatus draft. */
 export const DRAFT_FILTER = 'draft';
 
+/** Kunci filter untuk pesanan yang sudah dibatalkan. */
+export const VOID_FILTER = 'void';
+
 /**
  * True bila order masih berstatus draft, yaitu order tersimpan yang belum
  * diproses: belum ada invoice, belum reserving stok, belum masuk dapur.
@@ -69,17 +72,33 @@ export function matchesPaymentFilter(order, filter) {
 
 /**
  * Tahap proses sebuah pesanan untuk filter & badge. Draft selalu jadi "Draft"
- * (belum diproses). Selain itu tahap diturunkan dari status item terendah;
- * pesanan tanpa item dianggap masih Dipesan.
+ * (belum diproses), pesanan yang dibatalkan jadi "Dibatalkan", dan sisanya
+ * diturunkan dari status item terendah; pesanan tanpa item dianggap masih
+ * Dipesan.
+ *
+ * Item yang dibatalkan diabaikan: pembatalan menandai seluruh item pesanan itu
+ * `cancelled`, sehingga memakainya untuk menentukan tahap akan membuat pesanan
+ * yang sudah dibatalkan terlihat seperti masih berjalan di dapur.
  */
 export function orderProcessStatus(order) {
     if (isDraftOrder(order)) return DRAFT_FILTER;
+    if (isVoidedOrder(order)) return VOID_FILTER;
 
-    const items = order?.items ?? [];
+    const items = (order?.items ?? []).filter((item) => item.status !== 'cancelled');
     if (items.length === 0) return 'pending';
     if (items.every((item) => item.status === 'done')) return 'done';
     if (items.some((item) => item.status === 'pending')) return 'pending';
     if (items.some((item) => item.status === 'cooking')) return 'cooking';
 
     return 'sent';
+}
+
+/** True bila pesanan sudah dibatalkan admin. */
+export function isVoidedOrder(order) {
+    return order?.status === 'void';
+}
+
+/** True bila uang pada pesanan sudah dikembalikan seluruhnya lewat retur. */
+export function isRefundedOrder(order) {
+    return order?.payment_status === 'refunded';
 }

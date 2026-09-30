@@ -60,16 +60,22 @@ export function MethodChip({ method, active, onClick }) {
 }
 
 /**
- * Dropdown pembayaran ringkas untuk sidebar transaksi.
+ * Tombol "Bayar" untuk sidebar transaksi.
  *
- * Metode, QRIS, dan input nominal diletakkan dalam satu dropdown yang sama,
- * jadi kasir cukup mengetik nominal langsung di tempatnya tanpa membuka
- * lapisan atau mengisi label terpisah. Baris Kembalian muncul tepat di bawah
- * input selama nominal masih melebihi tagihan.
+ * Semula metode, QRIS, dan input nominal diletakkan dalam satu dropdown yang
+ * harus dibuka dulu. Sekarang panel pembayaran dibuka langsung dari tombolnya,
+ * dan urutannya dibalik: input nominal dulu, metode pembayaran di bawahnya.
+ * Alasannya, angka selalu jadi keputusan pertama kasir — nominal menentukan
+ * kembalian dan kelayakan bayar sebagian, sementara metode baru menyesuaikan
+ * setelah nominal diketahui. Dengan urutan lama metode mengambil ruang di atas
+ * input sehingga nominal ter-desak ke bawah.
+ *
+ * Menutup cukup dengan menekan tombol yang sama, jadi tidak ada tombol kedua
+ * dan tidak ada kondisi modal yang harus di-reset.
  *
  * Nilai yang dibutuhkan:
  *
- * - `open`/`onToggle`  - keadaan dropdown, dikendalikan pemanggil.
+ * - `open`/`onToggle`  - keadaan panel, dikendalikan pemanggil.
  * - `methods`/`method`/`onMethodChange` - daftar metode dan yang aktif.
  * - `qrisId`           - QR statis; panel QRIS hanya muncul bila diisi.
  * - `amount`           - `{ raw, onChange, placeholder, disabled }` untuk
@@ -78,9 +84,9 @@ export function MethodChip({ method, active, onClick }) {
  * - `status`           - `{ text, cls }` untuk badge Lunas/Belum Lunas.
  * - `change`           - kembalian; barisnya disembunyikan saat 0.
  * - `note`/`hint`      - keterangan singkat di atas dan di bawah input.
- * - `summary`          - nilai ringkas pada baris header saat dropdown ditutup.
+ * - `summary`          - nilai ringkas pada tombol saat panel ditutup.
  */
-export function PaymentDropdown({
+export function PaymentButton({
     open,
     onToggle,
     methods = [],
@@ -95,53 +101,31 @@ export function PaymentDropdown({
     summary = null,
 }) {
     return (
-        <div className="mt-2">
+        <div className="mt-3">
             <button
                 type="button"
                 onClick={onToggle}
                 aria-expanded={open}
-                title="Isi pembayaran"
-                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-2 hover:bg-surface-3 transition-colors cursor-pointer"
+                title={open ? 'Tutup form pembayaran' : 'Isi pembayaran'}
+                className={`btn w-full justify-between ${open ? 'btn-secondary' : 'btn-primary'}`}
             >
-                <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
-                    <Wallet size={13} /> Bayar
+                <span className="flex items-center gap-1.5 uppercase tracking-wide">
+                    <Wallet size={14} /> Bayar
                 </span>
+
                 <span className="flex items-center gap-2 min-w-0">
                     {!open && status && <span className={`badge shrink-0 ${status.cls}`}>{status.text}</span>}
-                    {summary}
+                    {!open && summary}
                     <ChevronDown
-                        size={14}
-                        className={`text-muted shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+                        size={15}
+                        className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
                     />
                 </span>
             </button>
 
             {open && (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2 rounded-xl border border-line bg-surface-2/40 p-2">
                     {note}
-
-                    {methods.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                            {methods.map((item) => (
-                                <MethodChip
-                                    key={item.code}
-                                    method={item}
-                                    active={method === item.code}
-                                    onClick={() => onMethodChange(item.code)}
-                                />
-                            ))}
-                        </div>
-                    )}
-
-                    {qrisId && (
-                        <div className="bg-accent-soft rounded-lg p-3">
-                            <div className="flex items-center gap-2 mb-2 text-accent-ink font-bold text-sm">
-                                <QrCode size={15} /> QRIS — Scan untuk Bayar
-                            </div>
-                            <QrisQrCode value={qrisId} />
-                            <div className="text-[11px] text-muted mt-2 text-center">{qrisId}</div>
-                        </div>
-                    )}
 
                     {amount && (
                         <div className="flex items-center gap-2">
@@ -151,7 +135,7 @@ export function PaymentDropdown({
                                 placeholder={amount.placeholder}
                                 disabled={amount.disabled}
                                 wrapperClassName="flex-1 min-w-0"
-                                className="input !py-2 text-right font-semibold disabled:opacity-60"
+                                className="input !py-2.5 text-right text-base font-bold disabled:opacity-60"
                             />
                             {status && <span className={`badge shrink-0 ${status.cls}`}>{status.text}</span>}
                         </div>
@@ -166,6 +150,34 @@ export function PaymentDropdown({
                                 symbolClassName="text-muted"
                                 amountClassName="font-bold text-positive"
                             />
+                        </div>
+                    )}
+
+                    {methods.length > 0 && (
+                        <div className="pt-1">
+                            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                                Metode pembayaran
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                                {methods.map((item) => (
+                                    <MethodChip
+                                        key={item.code}
+                                        method={item}
+                                        active={method === item.code}
+                                        onClick={() => onMethodChange(item.code)}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {qrisId && (
+                        <div className="bg-accent-soft rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2 text-accent-ink font-bold text-sm">
+                                <QrCode size={15} /> QRIS &mdash; Scan untuk Bayar
+                            </div>
+                            <QrisQrCode value={qrisId} />
+                            <div className="text-[11px] text-muted mt-2 text-center">{qrisId}</div>
                         </div>
                     )}
 

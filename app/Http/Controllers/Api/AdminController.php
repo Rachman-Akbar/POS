@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\CashBankAccount;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\SalesReceipt;
 use App\Models\Setting;
+use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -14,6 +16,8 @@ use Illuminate\Validation\Rule;
 
 class AdminController extends Controller
 {
+    public function __construct(private readonly AuditLogger $audit) {}
+
     /**
      * Current value of every cashier flag, plus the app appearance.
      */
@@ -30,6 +34,8 @@ class AdminController extends Controller
      */
     public function update(Request $request): JsonResponse
     {
+        $before = ['flags' => Setting::cashierFlags(), 'appearance' => Setting::appearance()];
+
         $validated = $request->validate([
             'flags' => ['sometimes', 'array'],
             'flags.*' => ['sometimes', 'boolean'],
@@ -70,6 +76,16 @@ class AdminController extends Controller
                 ]
             );
         }
+
+        $this->audit->log(
+            $request,
+            'update',
+            'settings',
+            null,
+            'Memperbarui pengaturan admin.',
+            $before,
+            ['flags' => Setting::cashierFlags(), 'appearance' => Setting::appearance()],
+        );
 
         return response()->json([
             'data' => Setting::cashierFlags(),
@@ -149,6 +165,8 @@ class AdminController extends Controller
         $account = CashBankAccount::create($this->validatedAccount($request));
         $this->syncDefault($account);
 
+        $this->audit->log($request, 'create', 'cash', $account, "Menambah kas/bank {$account->name}.");
+
         return response()->json(['data' => $this->presentAccount($account)], Response::HTTP_CREATED);
     }
 
@@ -157,8 +175,20 @@ class AdminController extends Controller
      */
     public function updateCashBankAccount(Request $request, CashBankAccount $cashBankAccount): JsonResponse
     {
+        $old = $cashBankAccount->only(['name', 'type', 'account_number', 'bank_name', 'is_active', 'is_default']);
+
         $cashBankAccount->update($this->validatedAccount($request));
         $this->syncDefault($cashBankAccount);
+
+        $this->audit->log(
+            $request,
+            'update',
+            'cash',
+            $cashBankAccount,
+            "Memperbarui kas/bank {$cashBankAccount->name}.",
+            $old,
+            $cashBankAccount->only(['name', 'type', 'account_number', 'bank_name', 'is_active', 'is_default']),
+        );
 
         return response()->json(['data' => $this->presentAccount($cashBankAccount)]);
     }
@@ -166,9 +196,18 @@ class AdminController extends Controller
     /**
      * Delete a Cash & Bank account.
      */
-    public function destroyCashBankAccount(CashBankAccount $cashBankAccount): Response
+    public function destroyCashBankAccount(Request $request, CashBankAccount $cashBankAccount): Response|JsonResponse
     {
+        if ($cashBankAccount->receipts()->exists()) {
+            return response()->json([
+                'message' => 'Kas/Bank sudah memiliki transaksi. Nonaktifkan saja agar tidak dipakai lagi.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $name = $cashBankAccount->name;
         $cashBankAccount->delete();
+
+        $this->audit->log($request, 'delete', 'cash', null, "Menghapus kas/bank {$name}.");
 
         return response()->noContent();
     }
@@ -201,6 +240,8 @@ class AdminController extends Controller
     {
         $method = PaymentMethod::create($request->validate($this->methodRules()));
 
+        $this->audit->log($request, 'create', 'payment_method', $method, "Menambah metode pembayaran {$method->name}.");
+
         return response()->json(['data' => $method], Response::HTTP_CREATED);
     }
 
@@ -209,7 +250,19 @@ class AdminController extends Controller
      */
     public function updatePaymentMethod(Request $request, PaymentMethod $paymentMethod): JsonResponse
     {
+        $old = $paymentMethod->only(['code', 'type', 'name', 'mdr_rate', 'is_active']);
+
         $paymentMethod->update($request->validate($this->methodRules($paymentMethod->id)));
+
+        $this->audit->log(
+            $request,
+            'update',
+            'payment_method',
+            $paymentMethod,
+            "Memperbarui metode pembayaran {$paymentMethod->name}.",
+            $old,
+            $paymentMethod->only(['code', 'type', 'name', 'mdr_rate', 'is_active']),
+        );
 
         return response()->json(['data' => $paymentMethod->fresh()]);
     }
@@ -217,9 +270,21 @@ class AdminController extends Controller
     /**
      * Delete a payment method.
      */
-    public function destroyPaymentMethod(PaymentMethod $paymentMethod): Response
+    public function destroyPaymentMethod(Request $request, PaymentMethod $paymentMethod): Response|JsonResponse
     {
+        $used = SalesReceipt::where('payment_method', $paymentMethod->code)->exists();
+
+        if ($used) {
+            return response()->json([
+                'message' => 'Metode pembayaran sudah dipakai pada transaksi. Nonaktifkan saja agar tidak dipakai lagi.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $name = $paymentMethod->name;
+        $paymentMethod->accounts()->update(['payment_method_id' => null]);
         $paymentMethod->delete();
+
+        $this->audit->log($request, 'delete', 'payment_method', null, "Menghapus metode pembayaran {$name}.");
 
         return response()->noContent();
     }

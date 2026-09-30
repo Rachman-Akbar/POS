@@ -26,13 +26,13 @@ class KitchenFlowTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->kitchen = User::factory()->create(['role' => 'kitchen']);
+        $this->kitchen = $this->staff($this->kitchenPermissions(), ['role' => 'kitchen']);
         $this->product = Product::firstOrFail();
     }
 
     private function createOrder(?User $user = null): Order
     {
-        $user ??= User::factory()->create(['role' => 'waiter']);
+        $user ??= $this->staff($this->waiterPermissions(), ['role' => 'waiter']);
 
         $response = $this->actingAs($user)->postJson('/api/orders', [
             'payment_type' => 'pay_later',
@@ -48,16 +48,26 @@ class KitchenFlowTest extends TestCase
      * Produksi dapur punya empat tahap: pesanan masuk sebagai "Dipesan", lalu
      * Dimasak, Dikirim, Selesai. Tidak ada tahap "Draf" karena draft hanya
      * menampung transaksi sementara dan tidak pernah masuk papan dapur.
+     *
+     * `cancelled` bukan tahap produksi: itu penanda yang dibuat admin saat
+     * membatalkan transaksi, supaya dapur berhenti mengerjakan barang yang
+     * sudah dibatalkan.
      */
     public function test_item_status_exposes_four_production_stages(): void
     {
         $this->assertSame(
-            ['pending', 'cooking', 'sent', 'done'],
+            ['pending', 'cooking', 'sent', 'done', 'cancelled'],
             array_column(ItemStatus::cases(), 'value'),
         );
 
+        // Hanya empat tahap pertama yang punya tahap berikutnya.
         $this->assertSame(
-            ['Dipesan', 'Dimasak', 'Dikirim', 'Selesai'],
+            ['cooking', 'sent', 'done', null, null],
+            array_map(fn (ItemStatus $case): ?string => $case->next()?->value, ItemStatus::cases()),
+        );
+
+        $this->assertSame(
+            ['Dipesan', 'Dimasak', 'Dikirim', 'Selesai', 'Dibatalkan'],
             array_map(fn (ItemStatus $status) => $status->label(), ItemStatus::cases()),
         );
     }

@@ -33,7 +33,7 @@ class OrderFlowTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->waiter = User::factory()->create(['role' => 'waiter']);
+        $this->waiter = $this->staff($this->waiterPermissions(), ['role' => 'waiter']);
         $this->product = Product::firstOrFail();
     }
 

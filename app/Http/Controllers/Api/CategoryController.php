@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\Setting;
+use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -14,6 +15,8 @@ use Illuminate\Validation\Rule;
 
 class CategoryController extends Controller
 {
+    public function __construct(private readonly AuditLogger $audit) {}
+
     /**
      * Master kategori: baris tabel `categories` digabung dengan kategori yang
      * dipakai produk tanpa terdaftar, supaya katalog kasir tetap utuh.
@@ -62,7 +65,7 @@ class CategoryController extends Controller
     /**
      * Hapus kategori yang tidak lagi dipakai produk.
      */
-    public function destroy(Category $category): Response|JsonResponse
+    public function destroy(Request $request, Category $category): Response|JsonResponse
     {
         $total = $category->products()->count();
 
@@ -72,8 +75,11 @@ class CategoryController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $name = $category->name;
         $category->delete();
         $this->syncOrder();
+
+        $this->audit->log($request, 'delete', 'category', null, "Menghapus kategori {$name}.");
 
         return response()->noContent();
     }

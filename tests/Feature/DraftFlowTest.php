@@ -38,8 +38,8 @@ class DraftFlowTest extends TestCase
 
         $this->seed([ChartOfAccountSeeder::class, PaymentMethodSeeder::class, ProductSeeder::class]);
 
-        $this->cashier = User::factory()->create(['role' => 'cashier']);
-        $this->kitchen = User::factory()->create(['role' => 'kitchen']);
+        $this->cashier = $this->staff($this->cashierPermissions(), ['role' => 'cashier']);
+        $this->kitchen = $this->staff($this->kitchenPermissions(), ['role' => 'kitchen']);
         $this->product = Product::firstOrFail();
     }
 
@@ -93,7 +93,7 @@ class DraftFlowTest extends TestCase
     {
         $this->saveDraft();
 
-        $this->actingAs(User::factory()->create(['role' => 'kitchen']))
+        $this->actingAs($this->staff($this->kitchenPermissions()))
             ->getJson('/api/kitchen/items')
             ->assertOk()
             ->assertJsonCount(0, 'data.waiting')
@@ -106,7 +106,7 @@ class DraftFlowTest extends TestCase
     {
         $this->saveDraft();
 
-        $this->actingAs(User::factory()->create(['role' => 'waiter']))
+        $this->actingAs($this->staff($this->waiterPermissions()))
             ->getJson('/api/orders?active_only=1')
             ->assertOk()
             ->assertJsonCount(0, 'data');
@@ -168,7 +168,7 @@ class DraftFlowTest extends TestCase
             ])
             ->assertOk();
 
-        $this->actingAs(User::factory()->create(['role' => 'kitchen']))
+        $this->actingAs($this->staff($this->kitchenPermissions()))
             ->getJson('/api/kitchen/items')
             ->assertOk()
             ->assertJsonCount(1, 'data.waiting');
@@ -300,5 +300,53 @@ class DraftFlowTest extends TestCase
         ])->assertOk();
 
         $this->assertGreaterThan(0, JournalEntry::count());
+    }
+
+    public function test_a_draft_can_be_deleted_cleanly(): void
+    {
+        $draft = $this->saveDraft();
+        $itemId = $draft->items()->firstOrFail()->id;
+
+        $this->actingAs($this->cashier)
+            ->deleteJson("/api/orders/{$draft->id}")
+            ->assertNoContent();
+
+        $this->assertDatabaseMissing('orders', ['id' => $draft->id]);
+        $this->assertDatabaseMissing('order_items', ['id' => $itemId]);
+        $this->assertDatabaseHas('audit_logs', [
+            'module' => 'transaction',
+            'action' => 'delete',
+        ]);
+    }
+
+    public function test_a_normal_order_cannot_be_deleted(): void
+    {
+        $this->actingAs($this->cashier)->postJson('/api/orders', [
+            'payment_type' => 'pay_now',
+            'payment_method' => 'cash',
+            'items' => [['product_id' => $this->product->id, 'qty' => 1]],
+        ])->assertCreated();
+
+        $order = Order::where('status', '!=', OrderStatus::Draft->value)->firstOrFail();
+
+        $this->actingAs($this->cashier)
+            ->deleteJson("/api/orders/{$order->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Pesanan ini bukan draft.');
+
+        // Transaksi tetap utuh setelah percobaan hapus gagal.
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+    }
+
+    public function test_deleting_a_draft_requires_the_update_permission(): void
+    {
+        $draft = $this->saveDraft();
+        $reader = $this->staff(['transaction.view']);
+
+        $this->actingAs($reader)
+            ->deleteJson("/api/orders/{$draft->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('orders', ['id' => $draft->id]);
     }
 }

@@ -8,6 +8,7 @@ enum ItemStatus: string
     case Cooking = 'cooking';
     case Sent = 'sent';
     case Done = 'done';
+    case Cancelled = 'cancelled';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum ItemStatus: string
             self::Cooking => 'Dimasak',
             self::Sent => 'Dikirim',
             self::Done => 'Selesai',
+            self::Cancelled => 'Dibatalkan',
         };
     }
 
@@ -28,7 +30,7 @@ enum ItemStatus: string
             self::Pending => self::Cooking,
             self::Cooking => self::Sent,
             self::Sent => self::Done,
-            self::Done => null,
+            self::Done, self::Cancelled => null,
         };
     }
 }

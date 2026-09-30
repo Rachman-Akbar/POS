@@ -15,6 +15,12 @@ class MasterDataTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->actingAsSuperAdmin();
+    }
+
     public function test_admin_can_manage_master_categories(): void
     {
         Product::factory()->create(['name' => 'Nasi Goreng', 'category' => 'Makanan']);

@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentType;
 use App\Events\OrderCreated;
+use App\Events\OrderStatusUpdated;
 use App\Http\Controllers\Api\Concerns\SafeBroadcasts;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\PaymentMethod;
+use App\Services\AuditLogger;
 use App\Services\SalesService;
+use App\Services\TransactionScope;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +23,11 @@ class OrderController extends Controller
 {
     use SafeBroadcasts;
 
-    public function __construct(private readonly SalesService $salesService) {}
+    public function __construct(
+        private readonly SalesService $salesService,
+        private readonly TransactionScope $scope,
+        private readonly AuditLogger $audit,
+    ) {}
 
     /**
      * List orders visible to the waiter dashboard.
@@ -85,9 +92,11 @@ class OrderController extends Controller
             'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
         ]);
 
+        $this->authorizeDiscount($request, (float) ($data['discount'] ?? 0));
+
         try {
             $order = $this->salesService->createOrder(
-                user: null,
+                user: $request->user(),
                 tableNumber: $data['table_number'] ?? '',
                 paymentType: PaymentType::from($data['payment_type']),
                 items: $data['items'],
@@ -124,15 +133,21 @@ class OrderController extends Controller
      * Every order the cashier tracks, including drafts. Unlike the invoice
      * list this also returns orders that have no invoice yet, because a draft
      * is a stored order that has not been issued an invoice.
+     *
+     * Transaksi yang sudah dilunasi milik user lain disembunyikan, sedangkan
+     * pesanan aktif dan draft milik siapa pun tetap terlihat supaya kasir bisa
+     * melanjutkan pekerjaan yang ditinggalkan shift sebelumnya.
      */
-    public function transactions(): JsonResponse
+    public function transactions(Request $request): JsonResponse
     {
-        $orders = Order::query()
-            ->with([
+        $orders = $this->scope->orders(
+            Order::query()->with([
                 'items.product',
                 'customer',
                 'invoice.receipts',
-            ])
+            ]),
+            $request->user()
+        )
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->limit(200)
@@ -149,6 +164,8 @@ class OrderController extends Controller
     public function storeDraft(Request $request): JsonResponse
     {
         $data = $this->validateItems($request);
+
+        $this->authorizeDiscount($request, (float) ($data['discount'] ?? 0));
 
         $order = $this->salesService->saveDraft(
             user: $request->user(),
@@ -226,6 +243,53 @@ class OrderController extends Controller
         ], [
             'customer_id.exists' => 'Pelanggan tidak ditemukan atau sudah tidak aktif.',
         ]);
+    }
+
+    /**
+     * Diskon mengurangi uang yang benar-benar diterima, jadi diberikan permission
+     * sendiri dan tidak bisa dipakai diam-diam oleh role yang hanya boleh
+     * membaca. Diskon nol tetap boleh supaya kasir tidak terhenti.
+     */
+    private function authorizeDiscount(Request $request, float $discount): void
+    {
+        if ($discount <= 0 || $request->user()->hasPermission('pos.discount')) {
+            return;
+        }
+
+        abort(
+            Response::HTTP_FORBIDDEN,
+            'Anda tidak memiliki hak untuk memberi diskon. Hubungi supervisor.',
+        );
+    }
+
+    /**
+     * Hapus draft sebelum diproses.
+     *
+     * Draft tidak menyentuh invoice, jurnal, atau stok, jadi penghapusan aman
+     * dan langsung. Transaksi yang sudah jadi tetap tidak bisa dihapus — mana
+     * pun yang salah input, koreksi dilakukan lewat void/refund yang tercatat.
+     */
+    public function destroy(Request $request, Order $order): JsonResponse|Response
+    {
+        try {
+            $this->salesService->deleteDraft($order);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->audit->log(
+            $request,
+            'delete',
+            'transaction',
+            null,
+            sprintf('Menghapus draft %s.', $order->order_number),
+            ['status' => $order->status],
+            null,
+        );
+
+        $this->safeBroadcast(new OrderStatusUpdated($order, OrderStatus::Draft->value));
+
+        return response()->noContent();
     }
 
     /**
